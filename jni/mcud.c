@@ -163,6 +163,7 @@ void set_acc_on(int on){
 	if (acc_on != on){
 		acc_on = on;
 		//TODO ToolsJni.cmd_29_acc_state_to_bsp(on == 0 ? 0 : 1);
+		//TODO bluetooth on/off below should create a thread with a delay to avoid rapid on/off during ignition
 
 		if (on == 1){
 			if (resume_bt_on_wake == 1) system("service call bluetooth_manager 6"); // turn bluetooth ON
@@ -367,6 +368,19 @@ int main(int argc, char ** argv){
 
 	if (pthread_create(&mcu_reader, NULL, read_mcu, NULL) != 0) return -1;
 	pthread_detach(mcu_reader);
+
+/* Interfacing requirements;
+ *
+ * Hardware: MCU (serial /dev/ttyS0), BD37033 (i2c /dev/i2c-4), AMP (serial /dev/ttyS1)
+ * HALs: audio, car, lights, power, radio
+ *
+ * For HALs, will create unix domain sockets in /dev/car/, each named for their particular HAL,
+ * except for the car HAL, which will be named "main". Example: /dev/car/main
+ *
+ * Threads: Require one reader thread for each device and each HAL. In addition, this main thread
+ * will perform heartbeat and maintenance.
+ *
+ */
 
 	while (run){
 		if (do_heartbeat) write_mcu (heartbeat, 8);
