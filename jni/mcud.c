@@ -8,13 +8,30 @@
 #include <errno.h>
 #include <termios.h>
 
-int doHeartbeat = 1;
+#define USB_MODE_DEVICE 0
+#define USB_MODE_HOST 1
+
+unsigned char heartbeat[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x55, 0xfd};
+unsigned char sleep1[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x5f, 0xf7};
+unsigned char sleep2[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x61, 0xc9};
+unsigned char sleep3[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x62, 0xca};
+
+int do_heartbeat = 1;
 int run = 1;
 
+int sleeptick = 0;
+int resume_wifi_on_wake = 0;
+int resume_bt_on_wake = 0;
+int mcu_on = 1;
+int acc_on = 1;
+
 int mcu_fd;
+int bd_fd;
+int amp_fd;
 
 static pthread_mutex_t mcuwritelock;
-//TODO mutex for other ports
+static pthread_mutex_t bdwritelock;
+static pthread_mutex_t ampwritelock;
 
 int set_interface_attribs (int fd, int speed, int parity){
 	struct termios tty;
@@ -99,16 +116,111 @@ void process_mcu_radio(unsigned char* data, int len){
 	//TODO
 }
 
-void process_mcu_main(unsigned char* data, int len){
+void set_usb_mode(int mode){
 	//TODO
+}
+
+int pack_frame(unsigned char* data, unsigned char* buffer, int len){
+	int i;
+	unsigned char cs = 0;
+
+	if (sizeof(buffer) < len+5) return -1;
+
+	buffer[0] = 0x88;
+	buffer[1] = 0x55;
+	buffer[2] = len >> 8;
+	buffer[3] = len & 0xff;
+	cs = buffer[2]^buffer[3];
+	
+	for (i=0; i<len; i++){
+		buffer[i+4] = data[i];
+		cs ^= data[i];
+	}
+
+	buffer[len+4] = cs;
+	return 1;
+}
+
+void request_mcu_data(){
+	unsigned char cmd1[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x60, 0xc8};
+	unsigned char cmd2[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x00, 0x00, 0x02};
+	write_mcu(cmd1, 8);
+	write_mcu(cmd2, 8);
+}
+
+void set_mcu_on(int on){
+	if (mcu_on != on){
+		mcu_on = on;
+		if (on == 1){
+			request_mcu_data();
+			set_usb_mode(USB_MODE_HOST);
+		} else
+			set_usb_mode(USB_MODE_DEVICE);
+	}
+}
+
+void set_acc_on(int on){
+	if (acc_on != on){
+		acc_on = on;
+		//TODO ToolsJni.cmd_29_acc_state_to_bsp(on == 0 ? 0 : 1);
+
+		if (on == 1){
+			if (resume_bt_on_wake == 1) system("service call bluetooth_manager 6"); // turn bluetooth ON
+			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_ON");
+		} else {
+			if (system("dumpsys bluetooth_manager | busybox grep \"^  state:\" | busybox grep ON") == 0){
+				resume_bt_on_wake = 1;
+				system("service call bluetooth_manager 8"); // turn bluetooth OFF
+			} else
+				resume_bt_on_wake = 0;
+			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_OFF");
+		}
+	}
+}
+
+void set_headlights_on(int on){
+	//TODO
+}
+
+void set_ebrake_on(int on){
+	//TODO
+}
+
+void set_reverse_on(int on){
+	//TODO
+}
+
+void process_mcu_main(unsigned char* data, int len){
 	switch(data[2]){
 		case 0x88: // MCU On
+			sleeptick = 0;
+			if (resume_wifi_on_wake == 1){
+				system("svc wifi enable");
+				resume_wifi_on_wake = 0;
+			}
 			break;
 		case 0x89: // MCU shutdown sequence
 			switch(data[3]){
 				case 0x53:
+					do_heartbeat = 0;
+					sleeptick++;
+					if (sleeptick == 1){
+						if (system("dumpsys wifi | busybox grep \"^Wi-Fi is enabled\"") == 0){ // returns 0 when wifi is enabled, 256 when disabled.
+							// wifi is enabled. Store this and disable.
+							resume_wifi_on_wake = 1;
+							system("svc wifi disable");
+						} else
+							resume_wifi_on_wake = 0;
+					}
+					if (sleeptick > 4) write_mcu(sleep1, 8);
+					break;
 				case 0x54:
+					sleeptick = 0;
+					write_mcu(sleep2, 8);
 				case 0x55:
+					sleep(1);
+					write_mcu(sleep3, 8);
+					system("input keyevent 26");
 					break;
 			}
 			break;
@@ -117,24 +229,45 @@ void process_mcu_main(unsigned char* data, int len){
 		case 0x00: // MCU/ACC power state
 			switch(data[3]){
 				case 0x00: // MCU OFF
+					set_mcu_on(0);
+					return;
 				case 0x01: // MCU ON
+					set_mcu_on(1);
+					do_heartbeat = 1;
+					return;
 				case 0x21: // Must request MCU data
+					request_mcu_data();
+					return;
 				case 0x31: // ACC ON
+					set_acc_on(1);
+					return;
 				case 0x32: // ACC OFF
+					set_acc_on(0);
 					break;
 			}
 		case 0x07:
 			key_press(0x0);
 			break;
-		case 0x0d: // Radio band
-		case 0x10: // Buttons?
-		case 0x11: // More buttons
+		case 0x0d: // Radio band TODO
+		case 0x10: // Buttons? TODO
+		case 0x11: // More buttons TODO
+			break;
 		case 0x12: // Headlights OFF
+			set_headlights_on(0);
+			break;
 		case 0x13: // Headlights ON
-		case 0x21: // More buttons
+			set_headlights_on(1);
+			break;
+		case 0x21: // More buttons TODO
+			break;
 		case 0x23: // Reverse ON/OFF
+			if (data[3] == 0x02) set_reverse_on(0);
+			else if (data[3] == 0x03) set_reverse_on(1);
+			break;
 		case 0x24: // ebrake ON/OFF
-		case 0x60: // RDS ON
+			set_ebrake_on(data[3] & 1);
+			break;
+		case 0x60: // RDS ON TODO
 			break;
 	}
 }
@@ -220,7 +353,6 @@ void *read_mcu(void * args){
 }
 
 int main(int argc, char ** argv){
-	unsigned char heartbeat[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x55, 0xfd};
 	char *mcuportname = "/dev/ttyS0";
 	pthread_t mcu_reader;
 
@@ -237,7 +369,7 @@ int main(int argc, char ** argv){
 	pthread_detach(mcu_reader);
 
 	while (run){
-		if (doHeartbeat) write_mcu (heartbeat, 8);
+		if (do_heartbeat) write_mcu (heartbeat, 8);
 		sleep(1);
 	}
 }
