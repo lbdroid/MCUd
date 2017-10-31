@@ -28,8 +28,7 @@ int set_interface_attribs (int fd, int speed, int parity){
 	cfsetispeed (&tty, speed);
 
 	tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;	// 8-bit chars
-	// disable IGNBRK for mismatched speed tests; otherwise receive break
-	// as \000 chars
+	// disable IGNBRK for mismatched speed tests; otherwise receive break as \000 chars
 	tty.c_iflag &= ~IGNBRK;				// disable break processing
 	tty.c_lflag = 0;				// no signaling chars, no echo,
 							// no canonical processing
@@ -62,7 +61,7 @@ void set_blocking (int fd, int should_block){
 	}
 
 	tty.c_cc[VMIN]  = should_block ? 1 : 0;
-	tty.c_cc[VTIME] = 5;				// 0.5 seconds read timeout
+	tty.c_cc[VTIME] = 5;				// 0.5 seconds read timeout or inter-byte timeout
 
 	if (tcsetattr (fd, TCSANOW, &tty) != 0)
 	printf ("error %d setting term attributes", errno);
@@ -74,15 +73,38 @@ void write_mcu(unsigned char* data, int len){
 	pthread_mutex_unlock(&mcuwritelock);
 }
 
+void process_mcu(unsigned char* data, int len){
+
+}
+
 void *read_mcu(void * args){
-	char buf[1024];
+	unsigned char buf[1024];
 	int n;
+	int size;
+	int i;
+	int cs;
 	while (run){
-		n = read(mcu_fd, buf, sizeof(buf));
-		if (n > 0){
-			printf("read %d bytes\n", n);
+		n = read(mcu_fd, buf, 1);
+		if (n != 1 || buf[0] != 0x88) continue;
+
+		n = read(mcu_fd, buf+1, 1);
+		if (n != 1 || buf[1] != 0x55) continue;
+
+		n = read(mcu_fd, buf+2, 2);
+		if (n != 2) continue;
+
+		size = (((int)buf[2])<<8) + buf[3];
+		n = read(mcu_fd, buf+4, size+1);
+		if (n < size+1) continue;
+
+		cs = 0;
+		for (i=2; i<size+4; i++){
+			cs ^= buf[i];
 		}
-		usleep(100);
+		if (cs != buf[size+4]) continue;
+
+		printf("read %d bytes, checksum valid\n", size+5);
+		process_mcu(&buf[2], size);
 	}
 	return 0;
 }
@@ -99,21 +121,7 @@ int main(int argc, char ** argv){
 	}
 
 	set_interface_attribs (mcu_fd, B38400, 0);	// set speed to 38,400 bps, 8n1 (no parity)
-	set_blocking (mcu_fd, 0);			// set no blocking
-	// TODO: Should this be non-blocking reads? We know the precise packet format for the data that is
-	// coming in, so we should be able to perform blocking reads based on the actual length of packets.
-	// 0x8855XXXXDATAYY where XXXX is the length of DATA, and YY is a parity byte. So we should be able
-	// to read the first 4 bytes, maybe 1 byte at a time for first 2 bytes, then 2 bytes length, then
-	// the rest.
-	//
-	// set_blocking(mcu_fd, 1);
-	// read(mcu_fd, buf, 1);
-	// if (buff[0] != 0x88) bail;
-	// read(mcu_fd, buf, 1);
-	// if (buff[0] != 0x55) bail;
-	// read(mcu_fd, buf, 2);
-	// len = buf[0]<<8+buf[1];
-	// read(mcu_fd, buf, len+1); // don't forget to add the parity bit!!
+	set_blocking (mcu_fd, 1);			// set blocking reads
 
 	if (pthread_create(&mcu_reader, NULL, read_mcu, NULL) != 0) return -1;
 	pthread_detach(mcu_reader);
