@@ -87,17 +87,19 @@ int set_blocking (int fd, int should_block){
 	return 0;
 }
 
-void write_mcu(unsigned char* data, int len){
-	pthread_mutex_lock(&mcuwritelock);
-	write (mcu_fd, data, len);
-	pthread_mutex_unlock(&mcuwritelock);
-}
-
 void dump_packet(unsigned char* data, int len){
 	int i;
 	printf("0x");
-	for (i=0; i<len; i++) printf("%02X", data[i]);
+	for (i=0; i<len; i++) printf("%02x", data[i]);
 	printf("\n");
+}
+
+void write_mcu(unsigned char* data, int len){
+	pthread_mutex_lock(&mcuwritelock);
+	write (mcu_fd, data, len);
+	printf("Writing packet:    ");
+	dump_packet(data, len);
+	pthread_mutex_unlock(&mcuwritelock);
 }
 
 void process_mcu_aflag(unsigned char value){
@@ -327,19 +329,18 @@ void *read_mcu(void * args){
 		// Second 2 bytes: data length
 		// Next N bytes: data
 		// Last byte: checksum of length through data
-
 		n = read(mcu_fd, buf, 1);
 		if (n != 1 || buf[0] != 0x88) continue;
 
 		n = read(mcu_fd, buf+1, 1);
 		if (n != 1 || buf[1] != 0x55) continue;
 
-		n = read(mcu_fd, buf+2, 2);
-		if (n != 2) continue;
+		n = read(mcu_fd, buf+2, 1);
+		n+= read(mcu_fd, buf+3, 1);
 
 		size = (((int)buf[2])<<8) + buf[3];
-		n = read(mcu_fd, buf+4, size+1);
-		if (n < size+1) continue;
+		n=0;
+		for (i=0; i<size+1; i++) n+= read(mcu_fd, buf+i+4, 1);
 
 		cs = 0;
 		for (i=2; i<size+4; i++){
@@ -347,8 +348,9 @@ void *read_mcu(void * args){
 		}
 		if (cs != buf[size+4]) continue;
 
-		printf("read %d bytes, checksum valid\n", size+5);
-		process_mcu(&buf[2], size);
+		printf("Read valid packet: ");
+		dump_packet(buf, size+5);
+		process_mcu(&buf[4], size);
 	}
 	return 0;
 }
