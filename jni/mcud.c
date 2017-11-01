@@ -197,6 +197,7 @@ void process_mcu_main(unsigned char* data, int len){
 	switch(data[2]){
 		case 0x88: // MCU On
 			sleeptick = 0;
+			system("settings put secure location_providers_allowed +gps");
 			if (resume_wifi_on_wake == 1){
 				system("svc wifi enable");
 				resume_wifi_on_wake = 0;
@@ -208,6 +209,7 @@ void process_mcu_main(unsigned char* data, int len){
 					do_heartbeat = 0;
 					sleeptick++;
 					if (sleeptick == 1){
+						system("settings put secure location_providers_allowed -gps");
 						if (system("dumpsys wifi | busybox grep \"^Wi-Fi is enabled\"") == 0){ // returns 0 when wifi is enabled, 256 when disabled.
 							// wifi is enabled. Store this and disable.
 							resume_wifi_on_wake = 1;
