@@ -634,6 +634,9 @@ void *key_nohal_read(void * args){
 
 		while ((rc=read(key_nohal_cl_fd, buf, sizeof(buf))) > 0) {
 			printf("read %u bytes: %.*s\n", rc, rc, buf);
+
+			// For now, just echo the data back to the client
+			write (key_nohal_cl_fd, buf, rc);
 		}
 		if (rc == -1) {
 			perror("read");

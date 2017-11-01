@@ -3,13 +3,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <pthread.h>
 
 char *socket_path = "/dev/car/keys";
+int fd;
+
+void *socket_read(void * args){
+	int srv_fd, rc;
+	char buf[100];
+	while (1){
+		while ((rc=read(fd, buf, sizeof(buf))) > 0) {
+			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		}
+		if (rc == -1) {
+			perror("read");
+			exit(-1);
+		} else if (rc == 0) {
+			printf("EOF\n");
+			close(srv_fd);
+		}
+	}
+	return 0;
+}
 
 int main(int argc, char *argv[]) {
 	struct sockaddr_un addr;
+	pthread_t socket_reader;
 	char buf[100];
-	int fd,rc;
+	int rc;
 
 	if (argc > 1) socket_path=argv[1];
 
@@ -31,6 +52,9 @@ int main(int argc, char *argv[]) {
 		perror("connect error");
 		exit(-1);
 	}
+
+	if (pthread_create(&socket_reader, NULL, socket_read, NULL) != 0) return -1;
+	pthread_detach(socket_reader);
 
 	while( (rc=read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
 		if (write(fd, buf, rc) != rc) {
