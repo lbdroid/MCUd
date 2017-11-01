@@ -244,6 +244,7 @@ void process_mcu_main(unsigned char* data, int len){
 				case 0x54:
 					sleeptick = 0;
 					write_mcu(sleep2, 8);
+					break;
 				case 0x55:
 					sleep(1);
 					write_mcu(sleep3, 8);
@@ -257,17 +258,17 @@ void process_mcu_main(unsigned char* data, int len){
 			switch(data[3]){
 				case 0x00: // MCU OFF
 					set_mcu_on(0);
-					return;
+					break;
 				case 0x01: // MCU ON
 					set_mcu_on(1);
 					do_heartbeat = 1;
-					return;
+					break;
 				case 0x21: // Must request MCU data
 					request_mcu_data();
-					return;
+					break;
 				case 0x31: // ACC ON
 					set_acc_on(1);
-					return;
+					break;
 				case 0x32: // ACC OFF
 					set_acc_on(0);
 					break;
