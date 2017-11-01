@@ -50,7 +50,7 @@ int set_interface_attribs (int fd, int speed, int parity){
 	tty.c_lflag = 0;				// no signaling chars, no echo,
 							// no canonical processing
 	tty.c_oflag = 0;				// no remapping, no delays
-	tty.c_cc[VMIN]  = 0;				// read doesn't block
+	tty.c_cc[VMIN]  = 1;				// read blocks for min 1 byte
 	tty.c_cc[VTIME] = 5;				// 0.5 seconds read timeout
 
 	tty.c_iflag &= ~(IXON | IXOFF | IXANY);		// shut off xon/xoff ctrl
@@ -69,7 +69,7 @@ int set_interface_attribs (int fd, int speed, int parity){
 	return 0;
 }
 
-int set_blocking (int fd, int should_block){
+int set_block (int fd, int block_bytes){
 	struct termios tty;
 	memset (&tty, 0, sizeof tty);
 	if (tcgetattr (fd, &tty) != 0){
@@ -77,7 +77,7 @@ int set_blocking (int fd, int should_block){
 		return -1;
 	}
 
-	tty.c_cc[VMIN]  = should_block ? 1 : 0;
+	tty.c_cc[VMIN]  = block_bytes;
 	tty.c_cc[VTIME] = 5;				// 0.5 seconds read timeout or inter-byte timeout
 
 	if (tcsetattr (fd, TCSANOW, &tty) != 0){
@@ -359,18 +359,22 @@ void *read_mcu(void * args){
 		// Second 2 bytes: data length
 		// Next N bytes: data
 		// Last byte: checksum of length through data
+		set_block(mcu_fd, 1);
+
 		n = read(mcu_fd, buf, 1);
 		if (n != 1 || buf[0] != 0x88) continue;
 
 		n = read(mcu_fd, buf+1, 1);
 		if (n != 1 || buf[1] != 0x55) continue;
 
-		n = read(mcu_fd, buf+2, 1);
-		n+= read(mcu_fd, buf+3, 1);
+		set_block(mcu_fd, 2);
+		n = read(mcu_fd, buf+2, 2);
+		if (n < 2) continue;
 
-		size = (((int)buf[2])<<8) + buf[3];
-		n=0;
-		for (i=0; i<size+1; i++) n+= read(mcu_fd, buf+i+4, 1);
+		size = (((int)buf[2])<<8) + buf[3] + 1;
+		set_block(mcu_fd, size);
+		n = read(mcu_fd, buf+4, size);
+		if (n < size) continue;
 
 		cs = 0;
 		for (i=2; i<size+4; i++){
@@ -396,7 +400,6 @@ int main(int argc, char ** argv){
 	}
 
 	if (set_interface_attribs (mcu_fd, B38400, 0) < 0) return -1;	// set speed to 38,400 bps, 8n1 (no parity)
-	if (set_blocking (mcu_fd, 1) < 0) return -1;			// set blocking reads
 
 	if (pthread_create(&mcu_reader, NULL, read_mcu, NULL) != 0) return -1;
 	pthread_detach(mcu_reader);
