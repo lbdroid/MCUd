@@ -50,7 +50,8 @@ int set_interface_attribs (int fd, int speed, int parity){
 	tty.c_lflag = 0;				// no signaling chars, no echo,
 							// no canonical processing
 	tty.c_oflag = 0;				// no remapping, no delays
-	tty.c_cc[VMIN]  = 1;				// read blocks for min 1 byte
+	//TODO: Verify that the following setting is supported. read() should still return if fewer bytes requested.
+	tty.c_cc[VMIN]  = 0xff;				// read blocks for min 255 bytes
 	tty.c_cc[VTIME] = 5;				// 0.5 seconds read timeout
 
 	tty.c_iflag &= ~(IXON | IXOFF | IXANY);		// shut off xon/xoff ctrl
@@ -69,6 +70,7 @@ int set_interface_attribs (int fd, int speed, int parity){
 	return 0;
 }
 
+/* TODO delete this if possible
 int set_block (int fd, int block_bytes){
 	struct termios tty;
 	memset (&tty, 0, sizeof tty);
@@ -85,7 +87,7 @@ int set_block (int fd, int block_bytes){
 		return -1;
 	}
 	return 0;
-}
+}*/
 
 void dump_packet(unsigned char* data, int len){
 	int i;
@@ -359,7 +361,8 @@ void *read_mcu(void * args){
 		// Second 2 bytes: data length
 		// Next N bytes: data
 		// Last byte: checksum of length through data
-		set_block(mcu_fd, 1);
+
+		//TODO set_block(mcu_fd, 1);
 
 		n = read(mcu_fd, buf, 1);
 		if (n != 1 || buf[0] != 0x88) continue;
@@ -367,12 +370,12 @@ void *read_mcu(void * args){
 		n = read(mcu_fd, buf+1, 1);
 		if (n != 1 || buf[1] != 0x55) continue;
 
-		set_block(mcu_fd, 2);
+		//TODO set_block(mcu_fd, 2);
 		n = read(mcu_fd, buf+2, 2);
 		if (n < 2) continue;
 
 		size = (((int)buf[2])<<8) + buf[3] + 1;
-		set_block(mcu_fd, size);
+		//TODO set_block(mcu_fd, size);
 		n = read(mcu_fd, buf+4, size);
 		if (n < size) continue;
 
