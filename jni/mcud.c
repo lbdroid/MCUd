@@ -119,7 +119,11 @@ void process_mcu_radio(unsigned char* data, int len){
 }
 
 void set_usb_mode(int mode){
-	//TODO
+	int fd = open("/sys/kernel/debug/intel_otg/mode", O_RDWR);
+	if (fd != -1){
+		write(fd, (mode==USB_MODE_HOST)?"1":"0", 1);
+		close(fd);
+	}
 }
 
 int pack_frame(unsigned char* data, unsigned char* buffer, int len){
