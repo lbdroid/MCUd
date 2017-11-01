@@ -299,6 +299,11 @@ void process_mcu_main(unsigned char* data, int len){
 	}
 }
 
+void reset_mcu_delayed(unsigned char delay){
+	unsigned char payload[] = {0x88, 0x55, 0x00, 0x03, 0x06, 0x20, delay, (0x00 ^ 0x03 ^ 0x06 ^ 0x20 ^ delay)};
+	write_mcu(payload, 8);
+}
+
 void process_mcu(unsigned char* data, int len){
 	switch(data[0]){
 		case 0xc0:
@@ -326,7 +331,7 @@ void process_mcu(unsigned char* data, int len){
 			}
 			break;
 		case 0x06:
-			//TODO if (data[1] == 0x20) resetArmLaterCmd(data[2]);
+			if (data[1] == 0x20) reset_mcu_delayed(data[2]);
 			break;
 		case 0x0a:
 			process_mcu_aflag(data[1]);
