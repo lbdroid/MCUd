@@ -16,6 +16,12 @@ unsigned char sleep1[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x5f, 0xf7};
 unsigned char sleep2[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x61, 0xc9};
 unsigned char sleep3[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x62, 0xca};
 
+unsigned char oxaflag = 0x00;
+unsigned char KEY_ADC[50] = {0x0};
+unsigned char SCAN_ADC[6] = {0x0};
+unsigned char swi_detect = 0x0;
+unsigned char swi_adc = 0x0;
+
 int do_heartbeat = 1;
 int run = 1;
 
@@ -24,6 +30,9 @@ int resume_wifi_on_wake = 0;
 int resume_bt_on_wake = 0;
 int mcu_on = 1;
 int acc_on = 1;
+int headlights_on = 0;
+int ebrake_on = 0;
+int reverse_on = 0;
 
 int mcu_fd;
 int bd_fd;
@@ -104,20 +113,68 @@ void write_mcu(unsigned char* data, int len){
 	pthread_mutex_unlock(&mcuwritelock);
 }
 
-void process_mcu_aflag(unsigned char value){
-	//TODO
+void key_press(unsigned char keycode){
+	char cmd[512];
+	sprintf(cmd, "am broadcast -a tk.rabidbeaver.mcureceiver.MCU_KEY -ei %d", keycode);
+	printf("KEY PRESSED: %02x\n",keycode);
+	system(cmd);
+	//TODO something better than this...
 }
 
-void key_press(unsigned char keycode){
+void process_mcu_key(unsigned char* data, int len){
 	//TODO
+	printf("UNIMPLEMENTED panel key: ");
+	dump_packet(data, len);
 }
 
 void process_mcu_swi(unsigned char* data, int len){
-	//TODO
+	printf("swi key: ");
+	dump_packet(data, len);
+	switch(data[1]){
+		case 0x00:
+			switch(data[2]){
+				case 0x07: // 0x010007
+					key_press(0x12);
+					return;
+				case 0x10: // 0x010010
+					if (data[3] == 0x07){
+						key_press(0x0d);
+						return;
+					}
+					if (data[3] == 0x20){
+						key_press(0x0e);
+						return;
+					}
+			}
+			break;
+		case 0x07: // 0x0107
+			key_press(0xc);
+			return;
+		case 0x10: // onHandleSteer
+			switch(data[2]){
+				case 0xff:
+					swi_detect = data[3];
+					return;
+				case 0x00:
+					swi_adc = data[3];
+					return;
+				case 0x70:
+					key_press(data[3]);
+					return;
+			}
+			if (0x01 <= data[2] && data[2] <= 0x0d) KEY_ADC[data[2]-1] = data[3];
+			if (0x61 <= data[2] && data[2] <= 0x6b) KEY_ADC[data[2]-0x51] = data[3];
+			if (0x51 <= data[2] && data[2] <= 0x56) SCAN_ADC[data[2]-0x51] = data[3];
+			return;
+	}
+	printf("UNIMPLEMENTED key: ");
+	dump_packet(data, len);
 }
 
 void process_mcu_radio(unsigned char* data, int len){
 	//TODO
+	printf("UNIMPLEMENTED process_radio_mcu: ");
+	dump_packet(data, len);
 }
 
 void set_usb_mode(int mode){
@@ -203,18 +260,28 @@ void set_acc_on(int on){
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_OFF");
 		}
 	}
+	//TODO send to HAL when available
 }
 
 void set_headlights_on(int on){
-	//TODO
+	headlights_on = on;
+	if (on == 1) system("am broadcast -a tk.rabidbeaver.maincontroller.HEADLIGHTS_ON");
+	else system("am broadcast -a tk.rabidbeaver.maincontroller.HEADLIGHTS_OFF");
+	//TODO send to HAL when available
 }
 
 void set_ebrake_on(int on){
-	//TODO
+	ebrake_on = on;
+	if (on == 1) system("am broadcast -a tk.rabidbeaver.maincontroller.EBRAKE_ON");
+	else system("am broadcast -a tk.rabidbeaver.maincontroller.EBRAKE_OFF");
+	//TODO send to HAL when available
 }
 
 void set_reverse_on(int on){
-	//TODO
+	reverse_on = on;
+	if (on == 1) system("am broadcast -a tk.rabidbeaver.maincontroller.REVERSE_ON");
+	else system("am broadcast -a tk.rabidbeaver.maincontroller.REVERSE_OFF");
+	//TODO send to HAL when available
 }
 
 void process_mcu_main(unsigned char* data, int len){
@@ -254,7 +321,8 @@ void process_mcu_main(unsigned char* data, int len){
 					break;
 			}
 			break;
-		case 0x45: // Radio power on/off
+		case 0xd3: // Radio power on/off
+			process_mcu_radio(data, len);
 			break;
 		case 0x00: // MCU/ACC power state
 			switch(data[3]){
@@ -276,11 +344,16 @@ void process_mcu_main(unsigned char* data, int len){
 					break;
 			}
 		case 0x07:
-			key_press(0x0);
+			process_mcu_swi(data, len);
 			break;
-		case 0x0d: // Radio band TODO
-		case 0x10: // Buttons? TODO
-		case 0x11: // More buttons TODO
+		case 0x0d: // Button
+			process_mcu_swi(data, len);
+			break;
+		case 0x10: // Buttons
+			process_mcu_swi(data, len);
+			break;
+		case 0x11: // More buttons
+			process_mcu_swi(data, len);
 			break;
 		case 0x12: // Headlights OFF
 			set_headlights_on(0);
@@ -288,7 +361,8 @@ void process_mcu_main(unsigned char* data, int len){
 		case 0x13: // Headlights ON
 			set_headlights_on(1);
 			break;
-		case 0x21: // More buttons TODO
+		case 0x21: // More buttons
+			process_mcu_swi(data, len);
 			break;
 		case 0x23: // Reverse ON/OFF
 			if (data[3] == 0x02) set_reverse_on(0);
@@ -297,7 +371,8 @@ void process_mcu_main(unsigned char* data, int len){
 		case 0x24: // ebrake ON/OFF
 			set_ebrake_on(data[3] & 1);
 			break;
-		case 0x60: // RDS ON TODO
+		case 0x60: // RDS ON
+			process_mcu_radio(data, len);
 			break;
 	}
 }
@@ -312,7 +387,7 @@ void process_mcu(unsigned char* data, int len){
 		case 0xc0:
 		case 0xc3:
 		case 0xc4:
-			process_mcu_swi(data, len);
+			process_mcu_key(data, len);
 			break;
 		case 0x01:
 			switch(data[1]){
@@ -337,7 +412,7 @@ void process_mcu(unsigned char* data, int len){
 			if (data[1] == 0x20) reset_mcu_delayed(data[2]);
 			break;
 		case 0x0a:
-			process_mcu_aflag(data[1]);
+			oxaflag = data[1];
 			break;
 		case 0x21:
 		case 0x50:
