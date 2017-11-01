@@ -7,6 +7,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <termios.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #define USB_MODE_DEVICE 0
 #define USB_MODE_HOST 1
@@ -37,6 +39,19 @@ int reverse_on = 0;
 int mcu_fd;
 int bd_fd;
 int amp_fd;
+
+int key_nohal_fd;
+int key_nohal_cl_fd;
+int audio_hal_fd;
+int audio_hal_cl_fd;
+int car_hal_fd;
+int car_hal_cl_fd;
+int lights_hal_fd;
+int lights_hal_cl_fd;
+int power_hal_fd;
+int power_hal_cl_fd;
+int radio_hal_fd;
+int radio_hal_cl_fd;
 
 static pthread_mutex_t mcuwritelock;
 static pthread_mutex_t bdwritelock;
@@ -97,6 +112,32 @@ int set_block (int fd, int block_bytes){
 	}
 	return 0;
 }*/
+
+int create_socket(char *path){
+	int fd;
+	struct sockaddr_un sun;
+
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0) return -1;
+	if (fcntl(fd, F_SETFD, FD_CLOEXEC)) {
+		close(fd);
+		return -1;
+	}
+
+	memset(&sun, 0, sizeof(sun));
+	sun.sun_family = AF_LOCAL;
+	memset(sun.sun_path, 0, sizeof(sun.sun_path));
+	snprintf(sun.sun_path, sizeof(sun.sun_path), "%s", path);
+
+	unlink(sun.sun_path);
+
+	if (bind(fd, (struct sockaddr*)&sun, sizeof(sun)) < 0 || listen(fd, 1) < 0){
+		close(fd);
+		return -1;
+	}
+
+	return fd;
+}
 
 void dump_packet(unsigned char* data, int len){
 	int i;
@@ -467,9 +508,154 @@ void *read_mcu(void * args){
 	return 0;
 }
 
+void *audio_hal_read(void *args){
+	int rc;
+	char buf[100];
+	while (run){
+		if ((audio_hal_cl_fd = accept(audio_hal_fd, NULL, NULL)) == -1) {
+			perror("accept error");
+			continue;
+		}
+
+		while ((rc=read(audio_hal_cl_fd, buf, sizeof(buf))) > 0) {
+			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		}
+		if (rc == -1) {
+			perror("read");
+			exit(-1);
+		} else if (rc == 0) {
+			printf("EOF\n");
+			close(audio_hal_cl_fd);
+		}
+	}
+	return 0;
+}
+
+void *car_hal_read(void *args){
+	int rc;
+	char buf[100];
+	while (run){
+		if ((car_hal_cl_fd = accept(car_hal_fd, NULL, NULL)) == -1) {
+			perror("accept error");
+			continue;
+		}
+
+		while ((rc=read(car_hal_cl_fd, buf, sizeof(buf))) > 0) {
+			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		}
+		if (rc == -1) {
+			perror("read");
+			exit(-1);
+		} else if (rc == 0) {
+			printf("EOF\n");
+			close(car_hal_cl_fd);
+		}
+	}
+	return 0;
+}
+
+void *lights_hal_read(void *args){
+	int rc;
+	char buf[100];
+	while (run){
+		if ((lights_hal_cl_fd = accept(lights_hal_fd, NULL, NULL)) == -1) {
+			perror("accept error");
+			continue;
+		}
+
+		while ((rc=read(lights_hal_cl_fd, buf, sizeof(buf))) > 0) {
+			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		}
+		if (rc == -1) {
+			perror("read");
+			exit(-1);
+		} else if (rc == 0) {
+			printf("EOF\n");
+			close(lights_hal_cl_fd);
+		}
+	}
+	return 0;
+}
+
+void *power_hal_read(void *args){
+	int rc;
+	char buf[100];
+	while (run){
+		if ((power_hal_cl_fd = accept(power_hal_fd, NULL, NULL)) == -1) {
+			perror("accept error");
+			continue;
+		}
+
+		while ((rc=read(power_hal_cl_fd, buf, sizeof(buf))) > 0) {
+			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		}
+		if (rc == -1) {
+			perror("read");
+			exit(-1);
+		} else if (rc == 0) {
+			printf("EOF\n");
+			close(power_hal_cl_fd);
+		}
+	}
+	return 0;
+}
+
+void *radio_hal_read(void *args){
+	int rc;
+	char buf[100];
+	while (run){
+		if ((radio_hal_cl_fd = accept(radio_hal_fd, NULL, NULL)) == -1) {
+			perror("accept error");
+			continue;
+		}
+
+		while ((rc=read(radio_hal_cl_fd, buf, sizeof(buf))) > 0) {
+			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		}
+		if (rc == -1) {
+			perror("read");
+			exit(-1);
+		} else if (rc == 0) {
+			printf("EOF\n");
+			close(radio_hal_cl_fd);
+		}
+	}
+	return 0;
+}
+
+void *key_nohal_read(void * args){
+	int rc;
+	char buf[100];
+	while (run){
+		if ((key_nohal_cl_fd = accept(key_nohal_fd, NULL, NULL)) == -1) {
+			perror("accept error");
+			continue;
+		}
+
+		while ((rc=read(key_nohal_cl_fd, buf, sizeof(buf))) > 0) {
+			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		}
+		if (rc == -1) {
+			perror("read");
+			exit(-1);
+		} else if (rc == 0) {
+			printf("EOF\n");
+			close(key_nohal_cl_fd);
+		}
+	}
+	return 0;
+}
+
 int main(int argc, char ** argv){
 	char *mcuportname = "/dev/ttyS0";
 	pthread_t mcu_reader;
+
+	pthread_t key_nohal_reader;
+	pthread_t audio_hal_reader;
+	pthread_t car_hal_reader;
+	pthread_t lights_hal_reader;
+	pthread_t power_hal_reader;
+	pthread_t radio_hal_reader;
 
 	mcu_fd = open (mcuportname, O_RDWR | O_NOCTTY | O_SYNC);
 	if (mcu_fd < 0){
@@ -482,6 +668,31 @@ int main(int argc, char ** argv){
 	if (pthread_create(&mcu_reader, NULL, read_mcu, NULL) != 0) return -1;
 	pthread_detach(mcu_reader);
 
+	key_nohal_fd = create_socket("/dev/car/keys");
+	audio_hal_fd = create_socket("/dev/car/audio");
+	car_hal_fd = create_socket("/dev/car/main");
+	lights_hal_fd = create_socket("/dev/car/lights");
+	power_hal_fd = create_socket("/dev/car/power");
+	radio_hal_fd = create_socket("/dev/car/radio");
+
+	if (pthread_create(&key_nohal_reader, NULL, key_nohal_read, NULL) != 0) return -1;
+	pthread_detach(key_nohal_reader);
+
+	if (pthread_create(&audio_hal_reader, NULL, audio_hal_read, NULL) != 0) return -1;
+	pthread_detach(audio_hal_reader);
+
+	if (pthread_create(&car_hal_reader, NULL, car_hal_read, NULL) != 0) return -1;
+	pthread_detach(car_hal_reader);
+
+	if (pthread_create(&lights_hal_reader, NULL, lights_hal_read, NULL) != 0) return -1;
+	pthread_detach(lights_hal_reader);
+
+	if (pthread_create(&power_hal_reader, NULL, power_hal_read, NULL) != 0) return -1;
+	pthread_detach(power_hal_reader);
+
+	if (pthread_create(&radio_hal_reader, NULL, radio_hal_read, NULL) != 0) return -1;
+	pthread_detach(radio_hal_reader);
+
 /* Interfacing requirements;
  *
  * Hardware: MCU (serial /dev/ttyS0), BD37033 (i2c /dev/i2c-4), AMP (serial /dev/ttyS1)
@@ -489,6 +700,10 @@ int main(int argc, char ** argv){
  *
  * For HALs, will create unix domain sockets in /dev/car/, each named for their particular HAL,
  * except for the car HAL, which will be named "main". Example: /dev/car/main
+ *
+ * Other: There may be some controls that are not handled by a typical HAL, like programming the
+ * SWI. For this we will need to create additional unix domain socket(s) and build custom
+ * application to interface with it.
  *
  * Threads: Require one reader thread for each device and each HAL. In addition, this main thread
  * will perform heartbeat and maintenance.
