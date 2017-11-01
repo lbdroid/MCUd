@@ -161,8 +161,21 @@ void set_mcu_on(int on){
 	}
 }
 
+void *set_bt_off_delayed(void * args){
+	sleep(10);
+	if (acc_on == 0){
+		if (system("dumpsys bluetooth_manager | busybox grep \"^  state:\" | busybox grep ON") == 0){
+			resume_bt_on_wake = 1;
+			system("service call bluetooth_manager 8"); // turn bluetooth OFF
+		} else
+			resume_bt_on_wake = 0;
+	}
+	return 0;
+}
+
 void set_acc_on(int on){
 	int fd;
+	pthread_t bt_off_thread;
 	if (acc_on != on){
 		acc_on = on;
 		//I'm pretty sure that cmd_29_acc_state_to_bsp just writes "0" or "1" to /sys/fytver/acc_on
@@ -172,17 +185,15 @@ void set_acc_on(int on){
 			close(fd);
 		}
 
-		//TODO bluetooth on/off below should create a thread with a delay to avoid rapid on/off during ignition
-
 		if (on == 1){
 			if (resume_bt_on_wake == 1) system("service call bluetooth_manager 6"); // turn bluetooth ON
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_ON");
 		} else {
-			if (system("dumpsys bluetooth_manager | busybox grep \"^  state:\" | busybox grep ON") == 0){
-				resume_bt_on_wake = 1;
-				system("service call bluetooth_manager 8"); // turn bluetooth OFF
-			} else
-				resume_bt_on_wake = 0;
+			// Typically, you get into the car, turn the key to run position, which turns on ACC, then
+			// turn to the START position, which turns off ACC, then release when engine starts, turning
+			// back on ACC. To avoid the ON-OFF-ON, we launch a thread with a 10 second delay to shut down
+			// the bluetooth. If the ACC is turned OFF after the 10 second delay, THEN we turn off BT.
+			if (pthread_create(&bt_off_thread, NULL, set_bt_off_delayed, NULL) == 0) pthread_detach(bt_off_thread);
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_OFF");
 		}
 	}
