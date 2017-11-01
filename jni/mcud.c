@@ -162,9 +162,16 @@ void set_mcu_on(int on){
 }
 
 void set_acc_on(int on){
+	int fd;
 	if (acc_on != on){
 		acc_on = on;
-		//TODO ToolsJni.cmd_29_acc_state_to_bsp(on == 0 ? 0 : 1);
+		//I'm pretty sure that cmd_29_acc_state_to_bsp just writes "0" or "1" to /sys/fytver/acc_on
+		fd = open("/sys/fytver/acc_on", O_RDWR);
+		if (fd != -1){
+			write(fd, on?"1":"0", 1);
+			close(fd);
+		}
+
 		//TODO bluetooth on/off below should create a thread with a delay to avoid rapid on/off during ignition
 
 		if (on == 1){
