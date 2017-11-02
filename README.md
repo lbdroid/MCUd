@@ -1,4 +1,17 @@
 # MCUd
+
+First off, how to use/install:<br>
+build using included build.sh<br>
+copy file "mcud" to /system/bin/<br>
+set permissions on /system/bin/mcud to 755<br>
+add line to /system/bin/install-recovery.sh: /system/bin/mcud<br>
+if you don't have an install-recovery.sh, create it with the following;<br>
+<br>
+#!/system/bin/sh<br>
+/system/bin/mcud<br>
+<br>
+And don't forget to set its permissions to 755.<br>
+<br>
 <br>
 Right now, we have a bunch of different Java/Android projects, implementing communications with hardware<br>
 through questionable jni libraries. These projects are for the purpose of gaining control over the<br>
