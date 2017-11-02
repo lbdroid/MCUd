@@ -74,7 +74,6 @@ int set_interface_attribs (int fd, int speed, int parity){
 	tty.c_lflag = 0;				// no signaling chars, no echo,
 							// no canonical processing
 	tty.c_oflag = 0;				// no remapping, no delays
-	//TODO: Verify that the following setting is supported. read() should still return if fewer bytes requested.
 	tty.c_cc[VMIN]  = 0xff;				// read blocks for min 255 bytes
 	tty.c_cc[VTIME] = 5;				// 0.5 seconds read timeout
 
@@ -93,25 +92,6 @@ int set_interface_attribs (int fd, int speed, int parity){
 	}
 	return 0;
 }
-
-/* TODO delete this if possible
-int set_block (int fd, int block_bytes){
-	struct termios tty;
-	memset (&tty, 0, sizeof tty);
-	if (tcgetattr (fd, &tty) != 0){
-		printf ("error %d from tggetattr\n", errno);
-		return -1;
-	}
-
-	tty.c_cc[VMIN]  = block_bytes;
-	tty.c_cc[VTIME] = 5;				// 0.5 seconds read timeout or inter-byte timeout
-
-	if (tcsetattr (fd, TCSANOW, &tty) != 0){
-		printf ("error %d setting term attributes\n", errno);
-		return -1;
-	}
-	return 0;
-}*/
 
 int create_socket(char *path){
 	int fd;
@@ -384,6 +364,7 @@ void process_mcu_main(unsigned char* data, int len){
 					set_acc_on(0);
 					break;
 			}
+			break;
 		case 0x07:
 			process_mcu_swi(data, len);
 			break;
@@ -478,28 +459,24 @@ void *read_mcu(void * args){
 		// Next N bytes: data
 		// Last byte: checksum of length through data
 
-		//TODO set_block(mcu_fd, 1);
-
 		n = read(mcu_fd, buf, 1);
 		if (n != 1 || buf[0] != 0x88) continue;
 
 		n = read(mcu_fd, buf+1, 1);
 		if (n != 1 || buf[1] != 0x55) continue;
 
-		//TODO set_block(mcu_fd, 2);
 		n = read(mcu_fd, buf+2, 2);
 		if (n < 2) continue;
 
-		size = (((int)buf[2])<<8) + buf[3] + 1;
-		//TODO set_block(mcu_fd, size);
-		n = read(mcu_fd, buf+4, size);
-		if (n < size) continue;
+		size = (((int)buf[2])<<8) + buf[3];
+		n = read(mcu_fd, buf+4, size+1);
+		if (n < size+1) continue;
 
 		cs = 0;
-		for (i=2; i<size+4; i++){
+		for (i=2; i<size+5; i++){
 			cs ^= buf[i];
 		}
-		if (cs != buf[size+4]) continue;
+		if (cs != buf[size+5]) continue;
 
 		printf("Read valid packet: ");
 		dump_packet(buf, size+5);
