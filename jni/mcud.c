@@ -643,6 +643,8 @@ int main(int argc, char ** argv){
 	pthread_t power_hal_reader;
 	pthread_t radio_hal_reader;
 
+	daemon(0,0);
+
 	system("setprop audio.hw.allow_close 1");
 
 	mcu_fd = open (mcuportname, O_RDWR | O_NOCTTY | O_SYNC);
