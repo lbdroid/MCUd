@@ -19,7 +19,7 @@ unusual hardware design of SYU/FYT car radios, rather than relying on the horrib
 software that is shipped with them, which among other things, also includes spyware.<br>
 <br>
 These libraries in particular, include;<br>
-https://github.com/lbdroid/MCUController<br>
+https://github.com/lbdroid/MCUController (DEPRECATED)<br>
 https://github.com/lbdroid/MCUKeyReceiver<br>
 https://github.com/lbdroid/BD37033Controller<br>
 <br>
