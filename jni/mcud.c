@@ -9,9 +9,10 @@
 #include <termios.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <android/log.h>
 
-#define USB_MODE_DEVICE 0
-#define USB_MODE_HOST 1
+#define USB_MODE_DEVICE "none"
+#define USB_MODE_HOST "host"
 
 unsigned char heartbeat[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x55, 0xfd};
 unsigned char sleep1[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0xaa, 0x5f, 0xf7};
@@ -119,38 +120,36 @@ int create_socket(char *path){
 	return fd;
 }
 
-void dump_packet(unsigned char* data, int len){
+void dump_packet(char* label, unsigned char* data, int len){
 	int i;
-	printf("0x");
-	for (i=0; i<len; i++) printf("%02x", data[i]);
-	printf("\n");
+	char buffer[1024] = {0};
+	sprintf(buffer, "%s: 0x", label);
+	for (i=0; i<len; i++) sprintf(buffer+strlen(buffer), "%02x", data[i]);
+	__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "%s", buffer);
 }
 
 void write_mcu(unsigned char* data, int len){
 	pthread_mutex_lock(&mcuwritelock);
 	write (mcu_fd, data, len);
-	printf("Writing packet:    ");
-	dump_packet(data, len);
+	dump_packet("Write", data, len);
 	pthread_mutex_unlock(&mcuwritelock);
 }
 
 void key_press(unsigned char keycode){
 	char cmd[512];
 	sprintf(cmd, "am broadcast -a tk.rabidbeaver.mcureceiver.MCU_KEY -ei %d", keycode);
-	printf("KEY PRESSED: %02x\n",keycode);
+	__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "Key pressed: %02x", keycode);
 	system(cmd);
 	//TODO something better than this...
 }
 
 void process_mcu_key(unsigned char* data, int len){
 	//TODO
-	printf("UNIMPLEMENTED panel key: ");
-	dump_packet(data, len);
+	dump_packet("UNIMPLEMENTED panel key", data, len);
 }
 
 void process_mcu_swi(unsigned char* data, int len){
-	printf("swi key: ");
-	dump_packet(data, len);
+	dump_packet("SWI key", data, len);
 	switch(data[1]){
 		case 0x00:
 			switch(data[2]){
@@ -188,20 +187,18 @@ void process_mcu_swi(unsigned char* data, int len){
 			if (0x51 <= data[2] && data[2] <= 0x56) SCAN_ADC[data[2]-0x51] = data[3];
 			return;
 	}
-	printf("UNIMPLEMENTED key: ");
-	dump_packet(data, len);
+	dump_packet("UNIMPLEMENTED key", data, len);
 }
 
 void process_mcu_radio(unsigned char* data, int len){
 	//TODO
-	printf("UNIMPLEMENTED process_radio_mcu: ");
-	dump_packet(data, len);
+	dump_packet("UNIMPLEMENTED process_radio_mcu", data, len);
 }
 
-void set_usb_mode(int mode){
+void set_usb_mode(char* mode){
 	int fd = open("/sys/kernel/debug/intel_otg/mode", O_RDWR);
 	if (fd != -1){
-		write(fd, (mode==USB_MODE_HOST)?"1":"0", 1);
+		write(fd, mode, strlen(mode));
 		close(fd);
 	}
 }
@@ -237,6 +234,7 @@ void request_mcu_data(){
 void set_mcu_on(int on){
 	if (mcu_on != on){
 		mcu_on = on;
+		__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "Changing MCU Power: %d", on);
 		if (on == 1){
 			request_mcu_data();
 			set_usb_mode(USB_MODE_HOST);
@@ -262,7 +260,8 @@ void set_acc_on(int on){
 	pthread_t bt_off_thread;
 	if (acc_on != on){
 		acc_on = on;
-		//I'm pretty sure that cmd_29_acc_state_to_bsp just writes "0" or "1" to /sys/fytver/acc_on
+		__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "Changing ACC: %d", on);
+
 		fd = open("/sys/fytver/acc_on", O_RDWR);
 		if (fd != -1){
 			write(fd, on?"1":"0", 1);
@@ -307,23 +306,25 @@ void set_reverse_on(int on){
 
 void process_mcu_main(unsigned char* data, int len){
 	switch(data[2]){
-		case 0x88: // MCU On
+		case 0x88: // MCU early switch. This kicks both on shutdown AND on startup.
 			sleeptick = 0;
-			system("settings put secure location_providers_allowed +gps");
-			if (resume_wifi_on_wake == 1){
-				system("svc wifi enable");
-				resume_wifi_on_wake = 0;
-			}
 			break;
 		case 0x89: // MCU shutdown sequence
+			system("setprop sys.fyt.sleeping 1");
+			system("setprop sys.sleep 1");
+			system("setprop sys.sleeptimes 1");
 			switch(data[3]){
 				case 0x53:
 					do_heartbeat = 0;
 					sleeptick++;
 					if (sleeptick == 1){
+						set_usb_mode(USB_MODE_DEVICE);
 						system("settings put secure location_providers_allowed -gps");
-						if (system("dumpsys wifi | busybox grep \"^Wi-Fi is enabled\"") == 0){ // returns 0 when wifi is enabled, 256 when disabled.
+						// returns 0 when wifi is enabled, 256 when disabled.
+						__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "Checking wifi state");
+						if (system("dumpsys wifi | busybox grep \"^Wi-Fi is enabled\"") == 0){
 							// wifi is enabled. Store this and disable.
+							__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "Shutting wifi off");
 							resume_wifi_on_wake = 1;
 							system("svc wifi disable");
 						} else
@@ -353,6 +354,13 @@ void process_mcu_main(unsigned char* data, int len){
 				case 0x01: // MCU ON
 					set_mcu_on(1);
 					do_heartbeat = 1;
+					system("settings put secure location_providers_allowed +gps");
+					system("setprop sys.fyt.sleeping 0");
+					system("setprop sys.sleep 0");
+					if (resume_wifi_on_wake == 1){
+						system("svc wifi enable");
+						resume_wifi_on_wake = 0;
+					}
 					break;
 				case 0x21: // Must request MCU data
 					request_mcu_data();
@@ -397,6 +405,7 @@ void process_mcu_main(unsigned char* data, int len){
 			process_mcu_radio(data, len);
 			break;
 	}
+	dump_packet("PROCESS MCU MAIN Unhandled Packet", data, len);
 }
 
 void reset_mcu_delayed(unsigned char delay){
@@ -426,8 +435,8 @@ void process_mcu(unsigned char* data, int len){
 					process_mcu_swi(data, len);
 					break;
 				default:
-					printf ("MCU READ Unhandled Packet: ");
-					dump_packet(data, len);
+					dump_packet("READ Unhandled Packet", data, len);
+					break;
 			}
 			break;
 		case 0x06:
@@ -441,10 +450,9 @@ void process_mcu(unsigned char* data, int len){
 		case 0x51:
 			process_mcu_radio(data, len);
 			break;
-		default:
-			printf ("MCU READ Unhandled Packet: ");
-			dump_packet(data, len);			
+
 	}
+	dump_packet("READ Unhandled Packet", data, len);
 }
 
 void *read_mcu(void * args){
@@ -452,13 +460,12 @@ void *read_mcu(void * args){
 	int n;
 	int size;
 	int i;
-	int cs;
+	unsigned char cs;
 	while (run){
 		// First 2 bytes: header 0x8855
 		// Second 2 bytes: data length
 		// Next N bytes: data
 		// Last byte: checksum of length through data
-
 		n = read(mcu_fd, buf, 1);
 		if (n != 1 || buf[0] != 0x88) continue;
 
@@ -473,13 +480,12 @@ void *read_mcu(void * args){
 		if (n < size+1) continue;
 
 		cs = 0;
-		for (i=2; i<size+5; i++){
+		for (i=2; i<size+4; i++){
 			cs ^= buf[i];
 		}
-		if (cs != buf[size+5]) continue;
+		if (cs != buf[size+4]) continue;
 
-		printf("Read valid packet: ");
-		dump_packet(buf, size+5);
+		dump_packet("Read valid packet", buf, size+5);
 		process_mcu(&buf[4], size);
 	}
 	return 0;
@@ -610,7 +616,7 @@ void *key_nohal_read(void * args){
 		}
 
 		while ((rc=read(key_nohal_cl_fd, buf, sizeof(buf))) > 0) {
-			printf("read %u bytes: %.*s\n", rc, rc, buf);
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "KEYNOHAL read %u bytes: %.*s\n", rc, rc, buf);
 
 			// For now, just echo the data back to the client
 			write (key_nohal_cl_fd, buf, rc);
@@ -619,7 +625,7 @@ void *key_nohal_read(void * args){
 			perror("read");
 			exit(-1);
 		} else if (rc == 0) {
-			printf("EOF\n");
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "KEYNOHAL EOF");
 			close(key_nohal_cl_fd);
 		}
 	}
@@ -637,9 +643,11 @@ int main(int argc, char ** argv){
 	pthread_t power_hal_reader;
 	pthread_t radio_hal_reader;
 
+	system("setprop audio.hw.allow_close 1");
+
 	mcu_fd = open (mcuportname, O_RDWR | O_NOCTTY | O_SYNC);
 	if (mcu_fd < 0){
-		printf ("error %d opening %s: %s\n", errno, mcuportname, strerror (errno));
+		__android_log_print(ANDROID_LOG_ERROR, "MCUD", "error %d opening %s: %s\n", errno, mcuportname, strerror (errno));
 		return -1;
 	}
 
