@@ -71,6 +71,8 @@ static pthread_mutex_t ampwritelock;
 
 static pthread_mutex_t radiohalwritelock;
 static pthread_mutex_t keynohalwritelock;
+static pthread_mutex_t carhalwritelock;
+static pthread_mutex_t powerhalwritelock;
 
 int set_interface_attribs (int fd, int speed, int parity){
 	struct termios tty;
@@ -160,6 +162,38 @@ void write_mcu(unsigned char* data, int len){
 	pthread_mutex_unlock(&mcuwritelock);
 }
 
+void write_car_hal(unsigned char* data, int len){
+	if (car_hal_cl_fd > 0){
+		pthread_mutex_lock(&carhalwritelock);
+		write (car_hal_cl_fd, data, len);
+		pthread_mutex_unlock(&carhalwritelock);
+	}
+}
+
+void write_power_hal(unsigned char* data, int len){
+	if (power_hal_cl_fd > 0){
+		pthread_mutex_lock(&powerhalwritelock);
+		write (power_hal_cl_fd, data, len);
+		pthread_mutex_unlock(&powerhalwritelock);
+	}
+}
+
+void write_swi_nohal(unsigned char* data, int len){
+	if (key_nohal_cl_fd > 0){
+		pthread_mutex_lock(&keynohalwritelock);
+		write (key_nohal_cl_fd, data, len);
+		pthread_mutex_unlock(&keynohalwritelock);
+	}
+}
+
+void write_radio_hal(unsigned char* data, int len){
+	if (radio_hal_cl_fd > 0){
+		pthread_mutex_lock(&radiohalwritelock);
+		write (radio_hal_cl_fd, data, len);
+		pthread_mutex_unlock(&radiohalwritelock);
+	}
+}
+
 void key_press(unsigned char keycode){
 	char cmd[512];
 	sprintf(cmd, "am broadcast -a tk.rabidbeaver.mcureceiver.MCU_KEY -ei %d", keycode);
@@ -171,14 +205,6 @@ void key_press(unsigned char keycode){
 void process_mcu_key(unsigned char* data, int len){
 	//TODO
 	dump_packet("UNIMPLEMENTED panel key", data, len);
-}
-
-void write_swi_nohal(unsigned char* data, int len){
-	if (key_nohal_cl_fd > 0){
-		pthread_mutex_lock(&keynohalwritelock);
-		write (key_nohal_cl_fd, data, len);
-		pthread_mutex_unlock(&keynohalwritelock);
-	}
 }
 
 void send_swi_nohal(unsigned char id){
@@ -233,14 +259,6 @@ void process_mcu_swi(unsigned char* data, int len){
 			return;
 	}
 	dump_packet("UNIMPLEMENTED key", data, len);
-}
-
-void write_radio_hal(unsigned char* data, int len){
-	if (radio_hal_cl_fd > 0){
-		pthread_mutex_lock(&radiohalwritelock);
-		write (radio_hal_cl_fd, data, len);
-		pthread_mutex_unlock(&radiohalwritelock);
-	}
 }
 
 void send_radio_hal(unsigned char id){
@@ -437,6 +455,7 @@ void *set_bt_off_delayed(void * args){
 }
 
 void set_acc_on(int on){
+	unsigned char buffer[] = {0xaa, 0x55, 0x02, 0x01, 0x00, 0x00};
 	int fd;
 	pthread_t bt_off_thread;
 	if (acc_on != on){
@@ -452,6 +471,7 @@ void set_acc_on(int on){
 		if (on == 1){
 			if (resume_bt_on_wake == 1) system("service call bluetooth_manager 6"); // turn bluetooth ON
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_ON");
+			buffer[4] = 0x01;
 		} else {
 			// Typically, you get into the car, turn the key to run position, which turns on ACC, then
 			// turn to the START position, which turns off ACC, then release when engine starts, turning
@@ -459,30 +479,54 @@ void set_acc_on(int on){
 			// the bluetooth. If the ACC is turned OFF after the 10 second delay, THEN we turn off BT.
 			if (pthread_create(&bt_off_thread, NULL, set_bt_off_delayed, NULL) == 0) pthread_detach(bt_off_thread);
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_OFF");
+			buffer[4] = 0x00;
 		}
 	}
-	//TODO send to HAL when available
+	generate_cs(buffer, 6);
+	write_car_hal(buffer, 6);
+	write_power_hal(buffer, 6);
 }
 
 void set_headlights_on(int on){
+	unsigned char buffer[] = {0xaa, 0x55, 0x02, 0x02, 0x00, 0x00};
 	headlights_on = on;
-	if (on == 1) system("am broadcast -a tk.rabidbeaver.maincontroller.HEADLIGHTS_ON");
-	else system("am broadcast -a tk.rabidbeaver.maincontroller.HEADLIGHTS_OFF");
-	//TODO send to HAL when available
+	if (on == 1){
+		system("am broadcast -a tk.rabidbeaver.maincontroller.HEADLIGHTS_ON");
+		buffer[4] = 0x01;
+	} else {
+		system("am broadcast -a tk.rabidbeaver.maincontroller.HEADLIGHTS_OFF");
+		buffer[4] = 0x00;
+	}
+	generate_cs(buffer, 6);
+	write_car_hal(buffer, 6);
 }
 
 void set_ebrake_on(int on){
+	unsigned char buffer[] = {0xaa, 0x55, 0x02, 0x03, 0x00, 0x00};
 	ebrake_on = on;
-	if (on == 1) system("am broadcast -a tk.rabidbeaver.maincontroller.EBRAKE_ON");
-	else system("am broadcast -a tk.rabidbeaver.maincontroller.EBRAKE_OFF");
-	//TODO send to HAL when available
+	if (on == 1){
+		system("am broadcast -a tk.rabidbeaver.maincontroller.EBRAKE_ON");
+		buffer[4] = 0x01;
+	} else {
+		system("am broadcast -a tk.rabidbeaver.maincontroller.EBRAKE_OFF");
+		buffer[4] = 0x00;
+	}
+	generate_cs(buffer, 6);
+	write_car_hal(buffer, 6);
 }
 
 void set_reverse_on(int on){
+	unsigned char buffer[] = {0xaa, 0x55, 0x02, 0x04, 0x00, 0x00};
 	reverse_on = on;
-	if (on == 1) system("am broadcast -a tk.rabidbeaver.maincontroller.REVERSE_ON");
-	else system("am broadcast -a tk.rabidbeaver.maincontroller.REVERSE_OFF");
-	//TODO send to HAL when available
+	if (on == 1){
+		system("am broadcast -a tk.rabidbeaver.maincontroller.REVERSE_ON");
+		buffer[4] = 0x01;
+	} else {
+		system("am broadcast -a tk.rabidbeaver.maincontroller.REVERSE_OFF");
+		buffer[4] = 0x00;
+	}
+	generate_cs(buffer, 6);
+	write_car_hal(buffer, 6);
 }
 
 void process_mcu_main(unsigned char* data, int len){
@@ -669,98 +713,190 @@ void *read_mcu(void * args){
 	return 0;
 }
 
+void process_audio_command(unsigned char* data, int length){
+	// This is going to be the BD37033 controller!
+}
+
 void *audio_hal_read(void *args){
-	int rc;
-	char buf[100];
+	int rc, cs, i;
+	unsigned char buf[100];
 	while (run){
 		if ((audio_hal_cl_fd = accept(audio_hal_fd, NULL, NULL)) == -1) {
 			perror("accept error");
 			continue;
 		}
 
-		//TODO:
-		while ((rc=read(audio_hal_cl_fd, buf, sizeof(buf))) > 0) {
-			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		// forever read the client until the client disconnects.
+		while (run){
+			rc = read(audio_hal_cl_fd, buf, 1); // read for first shield byte 0xaa
+			if (rc <= 0) break;
+			if (buf[0] != 0xaa) continue;
+			rc = read(audio_hal_cl_fd, buf+1, 1); // read for second shield byte 0x55
+			if (rc <= 0) break;
+			if (buf[1] != 0x55) continue;
+			rc = read(audio_hal_cl_fd, buf+2, 1); // read length byte
+			if (rc <= 0) break;
+			rc = read(audio_hal_cl_fd, buf+3, buf[2]+1); // read the data + xor
+			if (rc <= 0 || rc < buf[2]+1) break; // rc will only be < buf[2]+1 if we run into EOF
+			cs = 0;
+			for (i = 2; i < buf[2]+3; i++) cs ^= buf[i];
+			if (cs == buf[buf[2]+3]){
+				dump_packet("audio_hal_read VALID", buf, buf[2]+4);
+				process_audio_command(buf, buf[2]+4);
+			} else {
+				dump_packet("audio_hal_read INVALID", buf, buf[2]+4);
+			}
 		}
+
 		if (rc == -1) {
-			perror("read");
-			exit(-1);
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "AUDIOHAL READ ERROR");
+			close(audio_hal_cl_fd);
 		} else if (rc == 0) {
-			printf("EOF\n");
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "AUDIOHAL EOF");
 			close(audio_hal_cl_fd);
 		}
+		audio_hal_cl_fd = 0;
 	}
 	return 0;
 }
 
+void process_car_command(unsigned char* data, int length){
+	// Control AMP and ANTENNA power signals?
+}
+
 void *car_hal_read(void *args){
-	int rc;
-	char buf[100];
+	int rc, cs, i;
+	unsigned char buf[100];
 	while (run){
 		if ((car_hal_cl_fd = accept(car_hal_fd, NULL, NULL)) == -1) {
 			perror("accept error");
 			continue;
 		}
 
-		//TODO:
-		while ((rc=read(car_hal_cl_fd, buf, sizeof(buf))) > 0) {
-			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		// forever read the client until the client disconnects.
+		while (run){
+			rc = read(car_hal_cl_fd, buf, 1); // read for first shield byte 0xaa
+			if (rc <= 0) break;
+			if (buf[0] != 0xaa) continue;
+			rc = read(car_hal_cl_fd, buf+1, 1); // read for second shield byte 0x55
+			if (rc <= 0) break;
+			if (buf[1] != 0x55) continue;
+			rc = read(car_hal_cl_fd, buf+2, 1); // read length byte
+			if (rc <= 0) break;
+			rc = read(car_hal_cl_fd, buf+3, buf[2]+1); // read the data + xor
+			if (rc <= 0 || rc < buf[2]+1) break; // rc will only be < buf[2]+1 if we run into EOF
+			cs = 0;
+			for (i = 2; i < buf[2]+3; i++) cs ^= buf[i];
+			if (cs == buf[buf[2]+3]){
+				dump_packet("car_hal_read VALID", buf, buf[2]+4);
+				process_car_command(buf, buf[2]+4);
+			} else {
+				dump_packet("car_hal_read INVALID", buf, buf[2]+4);
+			}
 		}
+
 		if (rc == -1) {
-			perror("read");
-			exit(-1);
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "CARHAL READ ERROR");
+			close(car_hal_cl_fd);
 		} else if (rc == 0) {
-			printf("EOF\n");
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "CARHAL EOF");
 			close(car_hal_cl_fd);
 		}
+		radio_hal_cl_fd = 0;
 	}
 	return 0;
 }
 
+void process_lights_command(unsigned char* data, int length){
+	// Likely this will mostly be for dealing with the panel button lights
+}
+
 void *lights_hal_read(void *args){
-	int rc;
-	char buf[100];
+	int rc, cs, i;
+	unsigned char buf[100];
 	while (run){
 		if ((lights_hal_cl_fd = accept(lights_hal_fd, NULL, NULL)) == -1) {
 			perror("accept error");
 			continue;
 		}
 
-		//TODO:
-		while ((rc=read(lights_hal_cl_fd, buf, sizeof(buf))) > 0) {
-			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		// forever read the client until the client disconnects.
+		while (run){
+			rc = read(lights_hal_cl_fd, buf, 1); // read for first shield byte 0xaa
+			if (rc <= 0) break;
+			if (buf[0] != 0xaa) continue;
+			rc = read(lights_hal_cl_fd, buf+1, 1); // read for second shield byte 0x55
+			if (rc <= 0) break;
+			if (buf[1] != 0x55) continue;
+			rc = read(lights_hal_cl_fd, buf+2, 1); // read length byte
+			if (rc <= 0) break;
+			rc = read(lights_hal_cl_fd, buf+3, buf[2]+1); // read the data + xor
+			if (rc <= 0 || rc < buf[2]+1) break; // rc will only be < buf[2]+1 if we run into EOF
+			cs = 0;
+			for (i = 2; i < buf[2]+3; i++) cs ^= buf[i];
+			if (cs == buf[buf[2]+3]){
+				dump_packet("lights_hal_read VALID", buf, buf[2]+4);
+				process_lights_command(buf, buf[2]+4);
+			} else {
+				dump_packet("lights_hal_read INVALID", buf, buf[2]+4);
+			}
 		}
+
 		if (rc == -1) {
-			perror("read");
-			exit(-1);
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "LIGHTSHAL READ ERROR");
+			close(lights_hal_cl_fd);
 		} else if (rc == 0) {
-			printf("EOF\n");
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "LIGHTSHAL EOF");
 			close(lights_hal_cl_fd);
 		}
+		lights_hal_cl_fd = 0;
 	}
 	return 0;
 }
 
+void process_power_command(unsigned char* data, int length){
+	// We can use this to receive commands like TURN SCREEN OFF.
+}
+
 void *power_hal_read(void *args){
-	int rc;
-	char buf[100];
+	int rc, cs, i;
+	unsigned char buf[100];
 	while (run){
 		if ((power_hal_cl_fd = accept(power_hal_fd, NULL, NULL)) == -1) {
 			perror("accept error");
 			continue;
 		}
 
-		//TODO:
-		while ((rc=read(power_hal_cl_fd, buf, sizeof(buf))) > 0) {
-			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		// forever read the client until the client disconnects.
+		while (run){
+			rc = read(power_hal_cl_fd, buf, 1); // read for first shield byte 0xaa
+			if (rc <= 0) break;
+			if (buf[0] != 0xaa) continue;
+			rc = read(power_hal_cl_fd, buf+1, 1); // read for second shield byte 0x55
+			if (rc <= 0) break;
+			if (buf[1] != 0x55) continue;
+			rc = read(power_hal_cl_fd, buf+2, 1); // read length byte
+			if (rc <= 0) break;
+			rc = read(power_hal_cl_fd, buf+3, buf[2]+1); // read the data + xor
+			if (rc <= 0 || rc < buf[2]+1) break; // rc will only be < buf[2]+1 if we run into EOF
+			cs = 0;
+			for (i = 2; i < buf[2]+3; i++) cs ^= buf[i];
+			if (cs == buf[buf[2]+3]){
+				dump_packet("power_hal_read VALID", buf, buf[2]+4);
+				process_power_command(buf, buf[2]+4);
+			} else {
+				dump_packet("power_hal_read INVALID", buf, buf[2]+4);
+			}
 		}
+
 		if (rc == -1) {
-			perror("read");
-			exit(-1);
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "POWERHAL READ ERROR");
+			close(power_hal_cl_fd);
 		} else if (rc == 0) {
-			printf("EOF\n");
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "POWERHAL EOF");
 			close(power_hal_cl_fd);
 		}
+		power_hal_cl_fd = 0;
 	}
 	return 0;
 }
