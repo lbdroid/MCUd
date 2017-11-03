@@ -70,6 +70,7 @@ static pthread_mutex_t bdwritelock;
 static pthread_mutex_t ampwritelock;
 
 static pthread_mutex_t radiohalwritelock;
+static pthread_mutex_t keynohalwritelock;
 
 int set_interface_attribs (int fd, int speed, int parity){
 	struct termios tty;
@@ -170,6 +171,26 @@ void key_press(unsigned char keycode){
 void process_mcu_key(unsigned char* data, int len){
 	//TODO
 	dump_packet("UNIMPLEMENTED panel key", data, len);
+}
+
+void write_swi_nohal(unsigned char* data, int len){
+	if (key_nohal_cl_fd > 0){
+		pthread_mutex_lock(&keynohalwritelock);
+		write (key_nohal_cl_fd, data, len);
+		pthread_mutex_unlock(&keynohalwritelock);
+	}
+}
+
+void send_swi_nohal(unsigned char id){
+	int i;
+	unsigned char adc_packet[] = {0xaa, 0x55, 0x07, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+	switch(id){
+		case 0x01: // adc scan
+			for (i = 4; i < 10; i++) adc_packet[i] = SCAN_ADC[i-4];
+			generate_cs(adc_packet, 11);
+			write_swi_nohal(adc_packet, 11);
+			return;
+	}
 }
 
 void process_mcu_swi(unsigned char* data, int len){
@@ -881,12 +902,13 @@ void *radio_hal_read(void *args){
 		}
 
 		if (rc == -1) {
-			perror("read");
-			exit(-1);
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "RADIOHAL READ ERROR");
+			close(radio_hal_cl_fd);
 		} else if (rc == 0) {
-			printf("EOF\n");
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "RADIOHAL EOF");
 			close(radio_hal_cl_fd);
 		}
+		radio_hal_cl_fd = 0;
 	}
 	return 0;
 }
@@ -966,12 +988,13 @@ void *key_nohal_read(void * args){
 			}
 		}
 		if (rc == -1) {
-			perror("read");
-			exit(-1);
+			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "KEYNOHAL READ ERROR");
+			close(key_nohal_cl_fd);
 		} else if (rc == 0) {
 			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "KEYNOHAL EOF");
 			close(key_nohal_cl_fd);
 		}
+		key_nohal_cl_fd = 0;
 	}
 	return 0;
 }
