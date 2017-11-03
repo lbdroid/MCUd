@@ -25,6 +25,17 @@ unsigned char SCAN_ADC[6] = {0x0};
 unsigned char swi_detect = 0x0;
 unsigned char swi_adc = 0x0;
 
+unsigned char radio_power_on = 0x1;
+unsigned char radio_rds_on = 0x0;
+unsigned char* rds_text_packet = 0;
+int rds_text_len = 0;
+int radio_freq = 0;
+unsigned char radio_band = 0x0;
+unsigned char radio_loc = 0x0;
+unsigned char radio_pty = 0x0;
+unsigned char radio_rds_stat = 0x0;
+unsigned char radio_area = 0x0;
+
 int do_heartbeat = 1;
 int run = 1;
 
@@ -57,6 +68,8 @@ int radio_hal_cl_fd;
 static pthread_mutex_t mcuwritelock;
 static pthread_mutex_t bdwritelock;
 static pthread_mutex_t ampwritelock;
+
+static pthread_mutex_t radiohalwritelock;
 
 int set_interface_attribs (int fd, int speed, int parity){
 	struct termios tty;
@@ -128,6 +141,17 @@ void dump_packet(char* label, unsigned char* data, int len){
 	__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "%s", buffer);
 }
 
+void generate_cs(unsigned char* data, int len){
+	int i;
+	unsigned char cs = 0;
+
+	for (i = 2; i < len-1; i++){
+		cs ^= data[i];
+	}
+
+	data[len-1] = cs;
+}
+
 void write_mcu(unsigned char* data, int len){
 	pthread_mutex_lock(&mcuwritelock);
 	write (mcu_fd, data, len);
@@ -190,9 +214,166 @@ void process_mcu_swi(unsigned char* data, int len){
 	dump_packet("UNIMPLEMENTED key", data, len);
 }
 
+void write_radio_hal(unsigned char* data, int len){
+	if (radio_hal_cl_fd > 0){
+		pthread_mutex_lock(&radiohalwritelock);
+		write (radio_hal_cl_fd, data, len);
+		pthread_mutex_unlock(&radiohalwritelock);
+	}
+}
+
+void send_radio_hal(unsigned char id){
+	unsigned char twobuffer[] = {0xaa, 0x55, 0x00, 0x02, 0x00, 0x00, 0x00};
+	unsigned char fourbuffer[] = {0xaa, 0x55, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+	switch(id){
+		case 0x0e: // get band
+			twobuffer[4] = 0x01;
+			twobuffer[5] = radio_band;
+			generate_cs(twobuffer, 7);
+			write_radio_hal(twobuffer, 7);
+			return;
+		case 0x0f: // get freq
+			fourbuffer[4] = 0x02;
+			fourbuffer[7] = radio_freq % 0x100;
+			fourbuffer[6] = radio_freq >> 8 % 0x100;
+			fourbuffer[5] = radio_freq >> 16 % 0x100;
+			generate_cs(fourbuffer, 9);
+			write_radio_hal(fourbuffer, 9);
+			return;
+		case 0x10: // get area
+			twobuffer[4] = 0x03;
+			twobuffer[5] = radio_area;
+			generate_cs(twobuffer, 7);
+			write_radio_hal(twobuffer, 7);
+			return;
+		case 0x11: // get rds on
+			twobuffer[4] = 0x0a;
+			twobuffer[5] = radio_rds_on;
+			generate_cs(twobuffer, 7);
+			write_radio_hal(twobuffer, 7);
+			return;
+		case 0x12: // get rds text
+			write_radio_hal(rds_text_packet, rds_text_len);
+			return;
+		case 0x13: // get power
+			twobuffer[4] = 0x09;
+			twobuffer[5] = radio_power_on;
+			generate_cs(twobuffer, 7);
+			write_radio_hal(twobuffer, 7);
+			return;
+		case 0x14: // get loc
+			twobuffer[4] = 0x06;
+			twobuffer[5] = radio_loc;
+			generate_cs(twobuffer, 7);
+			write_radio_hal(twobuffer, 7);
+			return;
+		case 0x15: // get pty_id
+			twobuffer[4] = 0x05;
+			twobuffer[5] = radio_pty;
+			generate_cs(twobuffer, 7);
+			write_radio_hal(twobuffer, 7);
+			return;
+		case 0x16: // get rds_stat
+			twobuffer[4] = 0x04;
+			twobuffer[5] = radio_rds_stat;
+			generate_cs(twobuffer, 7);
+			write_radio_hal(twobuffer, 7);
+			return;
+	}
+}
+
 void process_mcu_radio(unsigned char* data, int len){
-	//TODO
-	dump_packet("UNIMPLEMENTED process_radio_mcu", data, len);
+	int i;
+
+	switch(data[0]){
+		case 0x21: // radio config store and send here, also send when requested.
+			return;
+		case 0x50: // rds channel text
+			// This is somehow associated with stored "channels". Not sure what to do with that....
+			dump_packet("RDS CHANNEL TEXT", data, len);
+			return;
+		case 0x51: // rds text
+			dump_packet("RDS TEXT", data, len);
+			if (rds_text_packet > 0) free(rds_text_packet);
+			rds_text_packet = malloc(len);
+			rds_text_packet[0] = 0xaa;
+			rds_text_packet[1] = 0x55;
+			for (i = 2; i < len; i++) rds_text_packet[i] = data[i];
+			rds_text_packet[4] = 0x07;
+			generate_cs(rds_text_packet, len);
+			rds_text_len = len;
+			send_radio_hal(0x12);
+			return;
+		case 0x01:
+			switch(data[1]){
+				case 0x00:
+					switch(data[2]){
+						case 0x60: // rds on/off
+							if ((data[3] & 0x01) == 0x01) radio_power_on = 0x01;
+							else radio_rds_on = 0x00;
+							send_radio_hal(0x11);
+							return;
+						case 0xbb: // power on/off
+							if ((data[3] & 0x01) == 0x01) radio_rds_on = 0x01;
+							else radio_power_on = 0x00;
+							send_radio_hal(0x13);
+							return;
+					}
+					break;
+				case 0xd3: // ps text
+					dump_packet("RDS PS TEXT", data, len);
+					return;
+				case 0x03: // the big one
+					switch(data[2]){
+						case 0x80:
+						case 0x82:
+						case 0x00:
+							break;
+						case 0x01:
+							radio_freq = data[3] * 10000;
+							return;
+						case 0x02:
+							radio_freq += data[3] * 100;
+							return;
+						case 0x03:
+							radio_freq += data[3];
+							if (radio_freq > 100000){
+								radio_freq -= 100000;
+								return;
+							}
+							send_radio_hal(0x0f);
+							return;
+						case 0x05:
+						case 0x06:
+							break;
+						case 0x07: // loc
+							radio_loc = data[3] & 0x01;
+							send_radio_hal(0x14);
+							return;
+						case 0x08:
+						case 0x10:
+						case 0x18:
+							break;
+						case 0x21: // pty id
+							radio_pty = data[3];
+							send_radio_hal(0x15);
+							return;
+						case 0x22: // rds stat
+							radio_rds_stat = data[3];
+							send_radio_hal(0x16);
+							return;
+						case 0x30: // area
+							radio_area = data[3] - 0x01;
+							send_radio_hal(0x10);
+							return;
+					}
+					break;
+			}
+			break;
+	}
+
+	dump_packet("process_radio_mcu unhandled or invalid", data, len);
 }
 
 void set_usb_mode(char* mode){
@@ -201,27 +382,6 @@ void set_usb_mode(char* mode){
 		write(fd, mode, strlen(mode));
 		close(fd);
 	}
-}
-
-int pack_frame(unsigned char* data, unsigned char* buffer, int len){
-	int i;
-	unsigned char cs = 0;
-
-	if (sizeof(buffer) < len+5) return -1;
-
-	buffer[0] = 0x88;
-	buffer[1] = 0x55;
-	buffer[2] = len >> 8;
-	buffer[3] = len & 0xff;
-	cs = buffer[2]^buffer[3];
-	
-	for (i=0; i<len; i++){
-		buffer[i+4] = data[i];
-		cs ^= data[i];
-	}
-
-	buffer[len+4] = cs;
-	return 1;
 }
 
 void request_mcu_data(){
@@ -331,26 +491,26 @@ void process_mcu_main(unsigned char* data, int len){
 							resume_wifi_on_wake = 0;
 					}
 					if (sleeptick > 4) write_mcu(sleep1, 8);
-					break;
+					return;
 				case 0x54:
 					sleeptick = 0;
 					write_mcu(sleep2, 8);
-					break;
+					return;
 				case 0x55:
 					sleep(1);
 					write_mcu(sleep3, 8);
 					system("input keyevent 26");
-					break;
+					return;
 			}
 			break;
-		case 0xd3: // Radio power on/off
+		case 0xbb: // Radio power on/off
 			process_mcu_radio(data, len);
 			break;
 		case 0x00: // MCU/ACC power state
 			switch(data[3]){
 				case 0x00: // MCU OFF
 					set_mcu_on(0);
-					break;
+					return;
 				case 0x01: // MCU ON
 					set_mcu_on(1);
 					do_heartbeat = 1;
@@ -361,49 +521,49 @@ void process_mcu_main(unsigned char* data, int len){
 						system("svc wifi enable");
 						resume_wifi_on_wake = 0;
 					}
-					break;
+					return;
 				case 0x21: // Must request MCU data
 					request_mcu_data();
-					break;
+					return;
 				case 0x31: // ACC ON
 					set_acc_on(1);
-					break;
+					return;
 				case 0x32: // ACC OFF
 					set_acc_on(0);
-					break;
+					return;
 			}
 			break;
 		case 0x07:
 			process_mcu_swi(data, len);
-			break;
+			return;
 		case 0x0d: // Button
 			process_mcu_swi(data, len);
-			break;
+			return;
 		case 0x10: // Buttons
 			process_mcu_swi(data, len);
-			break;
+			return;
 		case 0x11: // More buttons
 			process_mcu_swi(data, len);
-			break;
+			return;
 		case 0x12: // Headlights OFF
 			set_headlights_on(0);
-			break;
+			return;
 		case 0x13: // Headlights ON
 			set_headlights_on(1);
-			break;
+			return;
 		case 0x21: // More buttons
 			process_mcu_swi(data, len);
-			break;
+			return;
 		case 0x23: // Reverse ON/OFF
 			if (data[3] == 0x02) set_reverse_on(0);
 			else if (data[3] == 0x03) set_reverse_on(1);
-			break;
+			return;
 		case 0x24: // ebrake ON/OFF
 			set_ebrake_on(data[3] & 1);
-			break;
+			return;
 		case 0x60: // RDS ON
 			process_mcu_radio(data, len);
-			break;
+			return;
 	}
 	dump_packet("PROCESS MCU MAIN Unhandled Packet", data, len);
 }
@@ -419,37 +579,34 @@ void process_mcu(unsigned char* data, int len){
 		case 0xc3:
 		case 0xc4:
 			process_mcu_key(data, len);
-			break;
+			return;
 		case 0x01:
 			switch(data[1]){
 				case 0xd3:
 				case 0x03:
 					process_mcu_radio(data, len);
-					break;
+					return;
 				case 0x00:
 					process_mcu_main(data, len);
-					break;
+					return;
 				case 0x07:
 				case 0x10:
 				case 0x38:
 					process_mcu_swi(data, len);
-					break;
-				default:
-					dump_packet("READ Unhandled Packet", data, len);
-					break;
+					return;
 			}
 			break;
 		case 0x06:
 			if (data[1] == 0x20) reset_mcu_delayed(data[2]);
-			break;
+			return;
 		case 0x0a:
 			oxaflag = data[1];
-			break;
+			return;
 		case 0x21:
 		case 0x50:
 		case 0x51:
 			process_mcu_radio(data, len);
-			break;
+			return;
 
 	}
 	dump_packet("READ Unhandled Packet", data, len);
@@ -500,6 +657,7 @@ void *audio_hal_read(void *args){
 			continue;
 		}
 
+		//TODO:
 		while ((rc=read(audio_hal_cl_fd, buf, sizeof(buf))) > 0) {
 			printf("read %u bytes: %.*s\n", rc, rc, buf);
 		}
@@ -523,6 +681,7 @@ void *car_hal_read(void *args){
 			continue;
 		}
 
+		//TODO:
 		while ((rc=read(car_hal_cl_fd, buf, sizeof(buf))) > 0) {
 			printf("read %u bytes: %.*s\n", rc, rc, buf);
 		}
@@ -546,6 +705,7 @@ void *lights_hal_read(void *args){
 			continue;
 		}
 
+		//TODO:
 		while ((rc=read(lights_hal_cl_fd, buf, sizeof(buf))) > 0) {
 			printf("read %u bytes: %.*s\n", rc, rc, buf);
 		}
@@ -569,6 +729,7 @@ void *power_hal_read(void *args){
 			continue;
 		}
 
+		//TODO:
 		while ((rc=read(power_hal_cl_fd, buf, sizeof(buf))) > 0) {
 			printf("read %u bytes: %.*s\n", rc, rc, buf);
 		}
@@ -583,18 +744,142 @@ void *power_hal_read(void *args){
 	return 0;
 }
 
+void process_radio_command(unsigned char* data, int length){
+	unsigned char band_AM[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x1d, 0x1c};
+	unsigned char band_FM[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x1a, 0x1b};
+	unsigned char step_up[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x11, 0x10};
+	unsigned char step_down[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x10, 0x11};
+	unsigned char seek_up[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x06, 0x07};
+	unsigned char seek_down[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x05, 0x04};
+	unsigned char power_on[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x00, 0xbb, 0xb9};
+	unsigned char power_off[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x00, 0xbc, 0xbe};
+	unsigned char rds_on[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x00, 0x60, 0x62};
+	unsigned char rds_off[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x00, 0x61, 0x63};
+	unsigned char autosens_on[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x00, 0x9f, 0x9d};
+	unsigned char autosens_off[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x00, 0x9e, 0x9f};
+	unsigned char stereo[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x0b, 0x0a};
+	unsigned char loc[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x0d, 0x0c};
+	unsigned char rdsptyen[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x15, 0x14};
+	unsigned char rdstaen[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x16, 0x17};
+	unsigned char rdsafen[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x17, 0x22};
+
+	unsigned char freq_direct[] = {0x88, 0x55, 0x00, 0x03, 0x25, 0x00, 0x00, 0x00};
+	unsigned char area[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x03, 0x00, 0x00};
+
+	switch(data[3]){
+		case 0x01: // band
+			if (length != 6) break;
+			if (data[4] == 0x01) write_mcu(band_AM, 8);
+			else write_mcu(band_FM, 8);
+			radio_band = data[4];
+			return;
+		case 0x02: // tune direct
+			if (length != 7) break;
+			if (data[4] > 0x2a) data[4] = 0x2a;
+			if (data[4] == 0x2a && data[5] > 0x30) data[5] = 0x30;
+			freq_direct[5] = data[4];
+			freq_direct[6] = data[5];
+			generate_cs(freq_direct, 8);
+			write_mcu(freq_direct, 8);
+			return;
+		case 0x03: // tune step
+			if (length != 6) break;
+			if (data[4] == 0x01) write_mcu(step_up, 8);
+			else write_mcu(step_down, 8);
+			return;
+		case 0x04: // seek
+			if (length != 6) break;
+			if (data[4] == 0x01) write_mcu(seek_up, 8);
+			else write_mcu(seek_down, 8);
+			return;
+		case 0x05: // power
+			if (length != 6) break;
+			if (data[4] == 0x01) write_mcu(power_on, 8);
+			else write_mcu(power_off, 8);
+			return;
+		case 0x06: // rds
+			if (length != 6) break;
+			if (data[4] == 0x01) write_mcu(rds_on, 8);
+			else write_mcu(rds_off, 8);
+			return;
+		case 0x07: // area
+			if (length != 6 || data[4] > 4) break;
+			area[6] = data[4];
+			generate_cs(area, 8);
+			write_mcu(area, 8);
+			return;
+		case 0x08: // auto sensitivity
+			if (length != 6) break;
+			if (data[4] == 0x01) write_mcu(autosens_on, 8);
+			else write_mcu(autosens_off, 8);
+			return;
+		case 0x09: // stereo
+			if (length != 5) break;
+			write_mcu(stereo, 8);
+			return;
+		case 0x0a: // loc
+			if (length != 5) break;
+			write_mcu(loc, 8);
+			return;
+		case 0x0b: // rds pty enable
+			if (length != 5) break;
+			write_mcu(rdsptyen, 8);
+			return;
+		case 0x0c: // rds ta enable
+			if (length != 5) break;
+			write_mcu(rdstaen, 8);
+			return;
+		case 0x0d: // rds af enable
+			if (length != 5) break;
+			write_mcu(rdsafen, 8);
+			return;
+		case 0x0e: // get band
+		case 0x0f: // get freq
+		case 0x10: // get area
+		case 0x11: // get rds on
+		case 0x12: // get rds text
+		case 0x13: // get power
+		case 0x14: // get loc
+		case 0x15: // get pty_id
+		case 0x16: // get rds_stat
+			send_radio_hal(data[3]);
+			return;
+		
+	}
+	dump_packet("process_radio_command UNKNOWN or INVALID Packet", data, length);
+}
+
 void *radio_hal_read(void *args){
-	int rc;
-	char buf[100];
+	int rc, cs, i;
+	unsigned char buf[100];
 	while (run){
 		if ((radio_hal_cl_fd = accept(radio_hal_fd, NULL, NULL)) == -1) {
 			perror("accept error");
 			continue;
 		}
 
-		while ((rc=read(radio_hal_cl_fd, buf, sizeof(buf))) > 0) {
-			printf("read %u bytes: %.*s\n", rc, rc, buf);
+		// forever read the client until the client disconnects.
+		while (run){
+			rc = read(radio_hal_cl_fd, buf, 1); // read for first shield byte 0xaa
+			if (rc <= 0) break;
+			if (buf[0] != 0xaa) continue;
+			rc = read(radio_hal_cl_fd, buf+1, 1); // read for second shield byte 0x55
+			if (rc <= 0) break;
+			if (buf[1] != 0x55) continue;
+			rc = read(radio_hal_cl_fd, buf+2, 1); // read length byte
+			if (rc <= 0) break;
+			rc = read(radio_hal_cl_fd, buf+3, buf[2]+1); // read the data + xor
+			if (rc <= 0 || rc < buf[2]+1) break; // rc will only be < buf[2]+1 if we run into EOF
+			cs = 0;
+			for (i = 2; i < buf[2]+3; i++) cs ^= buf[i];
+			if (cs == buf[buf[2]+3]){
+				dump_packet("radio_hal_read VALID", buf, buf[2]+4);
+				process_radio_command(buf, buf[2]+4);
+			} else {
+				dump_packet("radio_hal_read INVALID", buf, buf[2]+4);
+			}
 		}
+
 		if (rc == -1) {
 			perror("read");
 			exit(-1);
@@ -606,20 +891,79 @@ void *radio_hal_read(void *args){
 	return 0;
 }
 
+void process_key_command(unsigned char* data, int length){
+	int i;
+	unsigned char stop_detect[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x10, 0x00, 0x12};
+	unsigned char start_detect[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x10, 0x01, 0x13,
+					0x88, 0x55, 0x00, 0x03, 0x01, 0x10, 0x02, 0x10};
+	unsigned char clear[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x10, 0x20, 0x28};
+	unsigned char save[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x10, 0x21, 0x29};
+
+	unsigned char genkey[] = {0x88, 0x55, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00};
+
+	unsigned char key_map[] = {0x00, 0x12, 0x13, 0x14, 0x15, 0x00, 0x00, 0x18, 0x19, 0x1a,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x81, 0x82, 0x83,
+				0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a};
+
+	switch(data[3]){
+		case 0x01: // enter detection mode, value = [0|1]
+			if (length != 6) break;
+			swi_detect = data[4];
+			if (data[4] == 0x0) write_mcu(stop_detect, 8);
+			else write_mcu(start_detect, 16);
+			return;
+		case 0x02: // clear
+			if (length != 5) break;
+			write_mcu(clear, 8);
+			return;
+		case 0x03: // save
+			if (length != 5) break;
+			write_mcu(save, 8);
+			return;
+		case 0x04: // keyAdc
+			if (length != 6 || data[4] < 0x0 || data[4] >= 0x32) break;
+			i = 0;
+			while (i < 6 && SCAN_ADC[i] > 0xf0) i++;
+			if (i > 6) break;
+			genkey[5] = key_map[data[4]];
+			genkey[6] = swi_adc;
+			generate_cs(genkey, 8);
+			write_mcu(genkey, 8);
+			return;
+	}
+	dump_packet("process_key_command UNKNOWN or INVALID Packet", data, length);
+}
+
 void *key_nohal_read(void * args){
-	int rc;
-	char buf[100];
+	int rc, i, cs;
+	unsigned char buf[100];
+	// forever listen for connections
 	while (run){
 		if ((key_nohal_cl_fd = accept(key_nohal_fd, NULL, NULL)) == -1) {
 			perror("accept error");
 			continue;
 		}
 
-		while ((rc=read(key_nohal_cl_fd, buf, sizeof(buf))) > 0) {
-			__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "KEYNOHAL read %u bytes: %.*s\n", rc, rc, buf);
-
-			// For now, just echo the data back to the client
-			write (key_nohal_cl_fd, buf, rc);
+		// forever read the client until the client disconnects.
+		while (run){
+			rc = read(key_nohal_cl_fd, buf, 1); // read for first shield byte 0xaa
+			if (rc <= 0) break;
+			if (buf[0] != 0xaa) continue;
+			rc = read(key_nohal_cl_fd, buf+1, 1); // read for second shield byte 0x55
+			if (rc <= 0) break;
+			if (buf[1] != 0x55) continue;
+			rc = read(key_nohal_cl_fd, buf+2, 1); // read length byte
+			if (rc <= 0) break;
+			rc = read(key_nohal_cl_fd, buf+3, buf[2]+1); // read the data + xor
+			if (rc <= 0 || rc < buf[2]+1) break; // rc will only be < buf[2]+1 if we run into EOF
+			cs = 0;
+			for (i = 2; i < buf[2]+3; i++) cs ^= buf[i];
+			if (cs == buf[buf[2]+3]){
+				dump_packet("key_nohal_read VALID", buf, buf[2]+4);
+				process_key_command(buf, buf[2]+4);
+			} else {
+				dump_packet("key_nohal_read INVALID", buf, buf[2]+4);
+			}
 		}
 		if (rc == -1) {
 			perror("read");
@@ -658,12 +1002,16 @@ int main(int argc, char ** argv){
 	if (pthread_create(&mcu_reader, NULL, read_mcu, NULL) != 0) return -1;
 	pthread_detach(mcu_reader);
 
+	system ("/system/bin/mkdir /dev/car; /system/bin/chmod 755 /dev/car");
+
 	key_nohal_fd = create_socket("/dev/car/keys");
 	audio_hal_fd = create_socket("/dev/car/audio");
 	car_hal_fd = create_socket("/dev/car/main");
 	lights_hal_fd = create_socket("/dev/car/lights");
 	power_hal_fd = create_socket("/dev/car/power");
 	radio_hal_fd = create_socket("/dev/car/radio");
+
+	system ("/system/bin/chmod 777 /dev/car/*");
 
 	if (pthread_create(&key_nohal_reader, NULL, key_nohal_read, NULL) != 0) return -1;
 	pthread_detach(key_nohal_reader);
@@ -683,22 +1031,22 @@ int main(int argc, char ** argv){
 	if (pthread_create(&radio_hal_reader, NULL, radio_hal_read, NULL) != 0) return -1;
 	pthread_detach(radio_hal_reader);
 
-/* Interfacing requirements;
- *
- * Hardware: MCU (serial /dev/ttyS0), BD37033 (i2c /dev/i2c-4), AMP (serial /dev/ttyS1)
- * HALs: audio, car, lights, power, radio
- *
- * For HALs, will create unix domain sockets in /dev/car/, each named for their particular HAL,
- * except for the car HAL, which will be named "main". Example: /dev/car/main
- *
- * Other: There may be some controls that are not handled by a typical HAL, like programming the
- * SWI. For this we will need to create additional unix domain socket(s) and build custom
- * application to interface with it.
- *
- * Threads: Require one reader thread for each device and each HAL. In addition, this main thread
- * will perform heartbeat and maintenance.
- *
- */
+	/* Interfacing requirements;
+	 *
+	 * Hardware: MCU (serial /dev/ttyS0), BD37033 (i2c /dev/i2c-4), AMP (serial /dev/ttyS1)
+	 * HALs: audio, car, lights, power, radio
+	 *
+	 * For HALs, will create unix domain sockets in /dev/car/, each named for their particular HAL,
+	 * except for the car HAL, which will be named "main". Example: /dev/car/main
+	 *
+	 * Other: There may be some controls that are not handled by a typical HAL, like programming the
+	 * SWI. For this we will need to create additional unix domain socket(s) and build custom
+	 * application to interface with it.
+	 *
+	 * Threads: Require one reader thread for each device and each HAL. In addition, this main thread
+	 * will perform heartbeat and maintenance.
+	 *
+	 */
 
 	while (run){
 		if (do_heartbeat) write_mcu (heartbeat, 8);
