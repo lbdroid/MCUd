@@ -1,4 +1,17 @@
 # MCUd
+
+First off, how to use/install:<br>
+build using included build.sh<br>
+copy file "mcud" to /system/bin/<br>
+set permissions on /system/bin/mcud to 755<br>
+add line to /system/bin/install-recovery.sh: /system/bin/mcud<br>
+if you don't have an install-recovery.sh, create it with the following;<br>
+<br>
+#!/system/bin/sh<br>
+/system/bin/mcud<br>
+<br>
+And don't forget to set its permissions to 755.<br>
+<br>
 <br>
 Right now, we have a bunch of different Java/Android projects, implementing communications with hardware<br>
 through questionable jni libraries. These projects are for the purpose of gaining control over the<br>
@@ -6,7 +19,7 @@ unusual hardware design of SYU/FYT car radios, rather than relying on the horrib
 software that is shipped with them, which among other things, also includes spyware.<br>
 <br>
 These libraries in particular, include;<br>
-https://github.com/lbdroid/MCUController<br>
+https://github.com/lbdroid/MCUController (DEPRECATED)<br>
 https://github.com/lbdroid/MCUKeyReceiver<br>
 https://github.com/lbdroid/BD37033Controller<br>
 <br>
