@@ -196,10 +196,10 @@ void write_radio_hal(unsigned char* data, int len){
 
 void key_press(unsigned char keycode){
 	char cmd[512];
-	sprintf(cmd, "am broadcast -a tk.rabidbeaver.mcureceiver.MCU_KEY -ei %d", keycode);
+	sprintf(cmd, "am broadcast -a tk.rabidbeaver.mcureceiver.MCU_KEY --ei KEY %d", keycode);
 	__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "Key pressed: %02x", keycode);
 	system(cmd);
-	//TODO something better than this...
+	//TODO something better than this... Its really slow.
 }
 
 void process_mcu_key(unsigned char* data, int len){
@@ -255,7 +255,10 @@ void process_mcu_swi(unsigned char* data, int len){
 			}
 			if (0x01 <= data[2] && data[2] <= 0x0d) KEY_ADC[data[2]-1] = data[3];
 			if (0x61 <= data[2] && data[2] <= 0x6b) KEY_ADC[data[2]-0x51] = data[3];
-			if (0x51 <= data[2] && data[2] <= 0x56) SCAN_ADC[data[2]-0x51] = data[3];
+			if (0x51 <= data[2] && data[2] <= 0x56){
+				SCAN_ADC[data[2]-0x51] = data[3];
+				if (data[2] == 0x56) send_swi_nohal(0x01);
+			}
 			return;
 	}
 	dump_packet("UNIMPLEMENTED key", data, len);
