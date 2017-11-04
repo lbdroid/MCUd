@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <android/log.h>
+#include <linux/i2c-dev.h>
 
 #define USB_MODE_DEVICE "none"
 #define USB_MODE_HOST "host"
@@ -717,7 +718,12 @@ void *read_mcu(void * args){
 }
 
 void process_audio_command(unsigned char* data, int length){
-	// This is going to be the BD37033 controller!
+	int i;
+	for (i=3; i<length-2; i+=2){
+		if (write(bd_fd, data+i, 2) != 2){
+			__android_log_print(ANDROID_LOG_ERROR, "MCUD", "i2c write failure");
+		}
+	}
 }
 
 void *audio_hal_read(void *args){
@@ -1138,8 +1144,17 @@ void *key_nohal_read(void * args){
 	return 0;
 }
 
+void reset_bd37(){
+	char buf[] = {0xfe, 0x81};
+	if (write(bd_fd, buf, 2) != 2){
+		__android_log_print(ANDROID_LOG_ERROR, "MCUD", "i2c write failure");
+	}
+}
+
 int main(int argc, char ** argv){
 	char *mcuportname = "/dev/ttyS0";
+	char *bdportname = "/dev/i2c-4";
+	int bdaddr = 0x40;
 	pthread_t mcu_reader;
 
 	pthread_t key_nohal_reader;
@@ -1163,6 +1178,17 @@ int main(int argc, char ** argv){
 
 	if (pthread_create(&mcu_reader, NULL, read_mcu, NULL) != 0) return -1;
 	pthread_detach(mcu_reader);
+
+	bd_fd = open (bdportname, O_RDWR);
+	if (bd_fd < 0){
+		__android_log_print(ANDROID_LOG_ERROR, "MCUD", "error %d opening %s: %s\n", errno, bdportname, strerror (errno));
+		return -1;
+	}
+	if (ioctl(bd_fd, I2C_SLAVE, bdaddr) < 0) {
+		return -1;
+	}
+
+	reset_bd37();
 
 	system ("/system/bin/mkdir /dev/car; /system/bin/chmod 755 /dev/car");
 
