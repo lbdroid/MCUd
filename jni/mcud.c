@@ -207,11 +207,6 @@ void key_press(unsigned char keycode){
 	write_swi_nohal(key, 6);
 }
 
-void process_mcu_key(unsigned char* data, int len){
-	//TODO
-	dump_packet("UNIMPLEMENTED panel key", data, len);
-}
-
 void send_swi_nohal(unsigned char id){
 	int i;
 	unsigned char adc_packet[] = {0xaa, 0x55, 0x07, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -672,7 +667,7 @@ void process_mcu(unsigned char* data, int len){
 		case 0xc0:
 		case 0xc3:
 		case 0xc4:
-			process_mcu_key(data, len);
+			process_mcu_swi(data, len);
 			return;
 		case 0x01:
 			switch(data[1]){
