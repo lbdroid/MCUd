@@ -233,10 +233,10 @@ void process_mcu_swi(unsigned char* data, int len){
 							key_press(0x0d);
 							return;
 						case 0x0b:
-							key_press(0x24);
+							key_press(0x54);
 							return;
 						case 0x10:
-							key_press(0x23);
+							key_press(0x53);
 							return;
 						case 0x20:
 							key_press(0x0e);
@@ -245,16 +245,16 @@ void process_mcu_swi(unsigned char* data, int len){
 				case 0x11:
 					switch(data[3]){
 						case 0x01:
-							key_press(0x20);
+							key_press(0x50);
 							return;
 						case 0x06:
-							key_press(0x21);
+							key_press(0x51);
 							return;
 					}
 				case 0x21:
 					switch(data[3]){
 						case 0x09:
-							key_press(0x22);
+							key_press(0x52);
 							return;
 					}
 			}
