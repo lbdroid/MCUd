@@ -233,13 +233,34 @@ void process_mcu_swi(unsigned char* data, int len){
 					key_press(0x12);
 					return;
 				case 0x10: // 0x010010
-					if (data[3] == 0x07){
-						key_press(0x0d);
-						return;
+					switch(data[3]){
+						case 0x07:
+							key_press(0x0d);
+							return;
+						case 0x0b:
+							key_press(0x24);
+							return;
+						case 0x10:
+							key_press(0x23);
+							return;
+						case 0x20:
+							key_press(0x0e);
+							return;
 					}
-					if (data[3] == 0x20){
-						key_press(0x0e);
-						return;
+				case 0x11:
+					switch(data[3]){
+						case 0x01:
+							key_press(0x20);
+							return;
+						case 0x06:
+							key_press(0x21);
+							return;
+					}
+				case 0x21:
+					switch(data[3]){
+						case 0x09:
+							key_press(0x22);
+							return;
 					}
 			}
 			break;
