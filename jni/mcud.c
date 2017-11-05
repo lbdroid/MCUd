@@ -159,8 +159,15 @@ void generate_cs(unsigned char* data, int len){
 void write_mcu(unsigned char* data, int len){
 	pthread_mutex_lock(&mcuwritelock);
 	write (mcu_fd, data, len);
-	dump_packet("Write", data, len);
+	dump_packet("WriteMCU", data, len);
 	pthread_mutex_unlock(&mcuwritelock);
+}
+
+void write_bd(unsigned char* data, int len){
+	pthread_mutex_lock(&bdwritelock);
+	write (bd_fd, data, len);
+	dump_packet("WriteBD", data, len);
+	pthread_mutex_unlock(&bdwritelock);
 }
 
 void write_car_hal(unsigned char* data, int len){
@@ -196,11 +203,8 @@ void write_radio_hal(unsigned char* data, int len){
 }
 
 void key_press(unsigned char keycode){
-	char cmd[512];
-	sprintf(cmd, "am broadcast -a tk.rabidbeaver.mcureceiver.MCU_KEY --ei KEY %d", keycode);
-	__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "Key pressed: %02x", keycode);
-	system(cmd);
-	//TODO something better than this... Its really slow.
+	unsigned char key[] = {0xaa, 0x55, 0x02, 0x02, keycode, 0x02 ^ 0x02 ^ keycode};
+	write_swi_nohal(key, 6);
 }
 
 void process_mcu_key(unsigned char* data, int len){
@@ -719,11 +723,7 @@ void *read_mcu(void * args){
 
 void process_audio_command(unsigned char* data, int length){
 	int i;
-	for (i=3; i<length-2; i+=2){
-		if (write(bd_fd, data+i, 2) != 2){
-			__android_log_print(ANDROID_LOG_ERROR, "MCUD", "i2c write failure");
-		}
-	}
+	for (i=3; i<length-2; i+=2) write_bd(data+i, 2);
 }
 
 void *audio_hal_read(void *args){
@@ -1072,6 +1072,8 @@ void process_key_command(unsigned char* data, int length){
 				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x81, 0x82, 0x83,
 				0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a};
 
+	char key_cmd[32] = {0};
+
 	switch(data[3]){
 		case 0x01: // enter detection mode, value = [0|1]
 			if (length != 6) break;
@@ -1096,6 +1098,11 @@ void process_key_command(unsigned char* data, int length){
 			genkey[6] = swi_adc;
 			generate_cs(genkey, 8);
 			write_mcu(genkey, 8);
+			return;
+		case 0x05: // input keyevent keycode
+			if (length != 6) break;
+			sprintf(key_cmd, "input keyevent %d", data[4]);
+			system(key_cmd);
 			return;
 	}
 	dump_packet("process_key_command UNKNOWN or INVALID Packet", data, length);
