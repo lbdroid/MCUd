@@ -1193,6 +1193,7 @@ int main(int argc, char ** argv){
 	daemon(0,0);
 
 	system("setprop audio.hw.allow_close 1");
+	system("setprop persist.service.bdroid.ssp true");
 
 	mcu_fd = open (mcuportname, O_RDWR | O_NOCTTY | O_SYNC);
 	if (mcu_fd < 0){
