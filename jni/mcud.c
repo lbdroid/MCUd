@@ -42,7 +42,6 @@ int run = 1;
 
 int sleeptick = 0;
 int resume_wifi_on_wake = 0;
-int resume_bt_on_wake = 0;
 int mcu_on = 1;
 int acc_on = 1;
 int headlights_on = 0;
@@ -478,13 +477,7 @@ void set_mcu_on(int on){
 
 void *set_bt_off_delayed(void * args){
 	sleep(10);
-	if (acc_on == 0){
-		if (system("dumpsys bluetooth_manager | busybox grep \"^  state:\" | busybox grep ON") == 0){
-			resume_bt_on_wake = 1;
-			system("service call bluetooth_manager 8"); // turn bluetooth OFF
-		} else
-			resume_bt_on_wake = 0;
-	}
+	if (acc_on == 0) system("service call bluetooth_manager 8"); // turn bluetooth OFF
 	return 0;
 }
 
@@ -503,7 +496,7 @@ void set_acc_on(int on){
 		}
 
 		if (on == 1){
-			if (resume_bt_on_wake == 1) system("service call bluetooth_manager 6"); // turn bluetooth ON
+			system("service call bluetooth_manager 6"); // turn bluetooth ON
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_ON");
 			buffer[4] = 0x01;
 		} else {
