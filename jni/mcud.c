@@ -198,6 +198,7 @@ void write_radio_hal(unsigned char* data, int len){
 	if (radio_hal_cl_fd > 0){
 		pthread_mutex_lock(&radiohalwritelock);
 		write (radio_hal_cl_fd, data, len);
+		dump_packet("WriteRadioHAL", data, len);
 		pthread_mutex_unlock(&radiohalwritelock);
 	}
 }
@@ -233,10 +234,10 @@ void process_mcu_swi(unsigned char* data, int len){
 							key_press(0x0d);
 							return;
 						case 0x0b:
-							key_press(0x54);
+							key_press(0x54); // MEDIA ?
 							return;
 						case 0x10:
-							key_press(0x53);
+							key_press(0x53); // BAND
 							return;
 						case 0x20:
 							key_press(0x0e);
@@ -245,22 +246,28 @@ void process_mcu_swi(unsigned char* data, int len){
 				case 0x11:
 					switch(data[3]){
 						case 0x01:
-							key_press(0x50);
+							key_press(0x50); // HOME
 							return;
 						case 0x06:
-							key_press(0x51);
+							key_press(0x51); // BACK
 							return;
 					}
 				case 0x21:
 					switch(data[3]){
+						case 0x07:
+							key_press(0x55);
+							return;
+						case 0x08:
+							key_press(0x56);
+							return;
 						case 0x09:
-							key_press(0x52);
+							key_press(0x52); // MUTE (toggle)
 							return;
 					}
 			}
 			break;
 		case 0x07: // 0x0107
-			key_press(0xc);
+			key_press(0xc); // NAVI
 			return;
 		case 0x10: // onHandleSteer
 			switch(data[2]){
@@ -269,6 +276,9 @@ void process_mcu_swi(unsigned char* data, int len){
 					return;
 				case 0x00:
 					swi_adc = data[3];
+					return;
+				case 0x50:
+					key_press(0x57);
 					return;
 				case 0x70:
 					key_press(data[3]);
@@ -391,7 +401,7 @@ void process_mcu_radio(unsigned char* data, int len){
 					switch(data[2]){
 						case 0x80:
 						case 0x82:
-						case 0x00:
+						case 0x00:// CHANNEL
 							break;
 						case 0x01:
 							radio_freq = data[3] * 10000;
@@ -408,7 +418,7 @@ void process_mcu_radio(unsigned char* data, int len){
 							send_radio_hal(0x0f);
 							return;
 						case 0x05:
-						case 0x06:
+						case 0x06:///////////////////////////////TODO BAND
 							break;
 						case 0x07: // loc
 							radio_loc = data[3] & 0x01;
