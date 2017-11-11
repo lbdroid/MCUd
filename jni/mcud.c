@@ -506,6 +506,7 @@ void set_acc_on(int on){
 			// the bluetooth. If the ACC is turned OFF after the 10 second delay, THEN we turn off BT.
 			//if (pthread_create(&bt_off_thread, NULL, set_bt_off_delayed, NULL) == 0) pthread_detach(bt_off_thread);
 			system("service call bluetooth_manager 8");
+			system("setprop audio.hw.allow_close 1");
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_OFF");
 			buffer[4] = 0x00;
 		}
