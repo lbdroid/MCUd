@@ -504,7 +504,8 @@ void set_acc_on(int on){
 			// turn to the START position, which turns off ACC, then release when engine starts, turning
 			// back on ACC. To avoid the ON-OFF-ON, we launch a thread with a 10 second delay to shut down
 			// the bluetooth. If the ACC is turned OFF after the 10 second delay, THEN we turn off BT.
-			if (pthread_create(&bt_off_thread, NULL, set_bt_off_delayed, NULL) == 0) pthread_detach(bt_off_thread);
+			//if (pthread_create(&bt_off_thread, NULL, set_bt_off_delayed, NULL) == 0) pthread_detach(bt_off_thread);
+			system("service call bluetooth_manager 8");
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_OFF");
 			buffer[4] = 0x00;
 		}
@@ -589,8 +590,10 @@ void process_mcu_main(unsigned char* data, int len){
 					write_mcu(sleep2, 8);
 					return;
 				case 0x55:
-					sleep(1);
+					sleep(2);
 					write_mcu(sleep3, 8);
+					usleep(500);
+					system("am broadcast -a tk.rabidbeaver.maincontroller.STANDBY");
 					system("input keyevent 26");
 					return;
 			}
