@@ -74,6 +74,8 @@ static pthread_mutex_t keynohalwritelock;
 static pthread_mutex_t carhalwritelock;
 static pthread_mutex_t powerhalwritelock;
 
+pthread_t keep_asleep_thread;
+
 int set_interface_attribs (int fd, int speed, int parity){
 	struct termios tty;
 	memset (&tty, 0, sizeof tty);
@@ -556,6 +558,14 @@ void set_reverse_on(int on){
 	write_car_hal(buffer, 6);
 }
 
+void *keep_asleep(void * args){
+	while (!acc_on){
+		system("input keyevent 223");
+		sleep(5);
+	}
+	return 0;
+}
+
 void process_mcu_main(unsigned char* data, int len){
 	switch(data[2]){
 		case 0x88: // MCU early switch. This kicks both on shutdown AND on startup.
@@ -589,9 +599,12 @@ void process_mcu_main(unsigned char* data, int len){
 					write_mcu(sleep2, 8);
 					return;
 				case 0x55:
-					sleep(1);
+					sleep(2);
 					write_mcu(sleep3, 8);
-					system("input keyevent 26");
+					usleep(500);
+					system("am broadcast -a tk.rabidbeaver.maincontroller.STANDBY");
+					if (pthread_create(&keep_asleep_thread, NULL, keep_asleep, NULL) == 0) pthread_detach(keep_asleep_thread);
+					else system("input keyevent 223");
 					return;
 			}
 			break;
