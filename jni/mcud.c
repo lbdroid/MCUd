@@ -571,7 +571,6 @@ void process_mcu_main(unsigned char* data, int len){
 					sleeptick++;
 					if (sleeptick == 1){
 						set_usb_mode(USB_MODE_DEVICE);
-						system("settings put secure location_providers_allowed -gps");
 						// returns 0 when wifi is enabled, 256 when disabled.
 						__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "Checking wifi state");
 						if (system("dumpsys wifi | busybox grep \"^Wi-Fi is enabled\"") == 0){
@@ -606,7 +605,6 @@ void process_mcu_main(unsigned char* data, int len){
 				case 0x01: // MCU ON
 					set_mcu_on(1);
 					do_heartbeat = 1;
-					system("settings put secure location_providers_allowed +gps");
 					system("setprop sys.fyt.sleeping 0");
 					system("setprop sys.sleep 0");
 					if (resume_wifi_on_wake == 1){
