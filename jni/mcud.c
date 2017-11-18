@@ -497,6 +497,7 @@ void set_acc_on(int on){
 
 		if (on == 1){
 			system("service call bluetooth_manager 6"); // turn bluetooth ON
+			system("settings put secure location_providers_allowed +gps");
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_ON");
 			buffer[4] = 0x01;
 		} else {
@@ -505,6 +506,7 @@ void set_acc_on(int on){
 			// back on ACC. To avoid the ON-OFF-ON, we launch a thread with a 10 second delay to shut down
 			// the bluetooth. If the ACC is turned OFF after the 10 second delay, THEN we turn off BT.
 			if (pthread_create(&bt_off_thread, NULL, set_bt_off_delayed, NULL) == 0) pthread_detach(bt_off_thread);
+			system("settings put secure location_providers_allowed -gps");
 			system("am broadcast -a tk.rabidbeaver.maincontroller.ACC_OFF");
 			buffer[4] = 0x00;
 		}
@@ -571,7 +573,6 @@ void process_mcu_main(unsigned char* data, int len){
 					sleeptick++;
 					if (sleeptick == 1){
 						set_usb_mode(USB_MODE_DEVICE);
-						system("settings put secure location_providers_allowed -gps");
 						// returns 0 when wifi is enabled, 256 when disabled.
 						__android_log_print(ANDROID_LOG_DEBUG, "MCUD", "Checking wifi state");
 						if (system("dumpsys wifi | busybox grep \"^Wi-Fi is enabled\"") == 0){
@@ -606,7 +607,6 @@ void process_mcu_main(unsigned char* data, int len){
 				case 0x01: // MCU ON
 					set_mcu_on(1);
 					do_heartbeat = 1;
-					system("settings put secure location_providers_allowed +gps");
 					system("setprop sys.fyt.sleeping 0");
 					system("setprop sys.sleep 0");
 					if (resume_wifi_on_wake == 1){
